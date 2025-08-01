@@ -104,27 +104,69 @@ class SocketService {
     }
 
     return new Promise((resolve, reject) => {
-      this.socket.emit(event, data, (response) => {
-        if (response && response.error) {
-          reject(new Error(response.error));
-        } else {
+      const timeout = setTimeout(() => {
+        reject(new Error('Request timeout'));
+      }, 10000);
+
+      this.socket.emit(event, data);
+      
+      // Listen for response events
+      const responseEvent = event.replace(/([A-Z])/g, '_$1').toLowerCase() + 'd';
+      
+      const handleResponse = (response) => {
+        clearTimeout(timeout);
+        this.socket.off(responseEvent, handleResponse);
+        
+        if (response && response.success !== undefined) {
           resolve(response);
+        } else {
+          resolve({ success: true }); // Default success for events without explicit response
         }
-      });
+      };
+
+      this.socket.once(responseEvent, handleResponse);
     });
   }
 
   // Bot-specific methods
   toggleBotConnection() {
-    return this.sendToServer('toggleBotConnection');
+    if (!this.socket || !this.connected) {
+      return Promise.reject(new Error('Socket not connected'));
+    }
+    this.socket.emit('toggleBotConnection');
+    return Promise.resolve({ success: true });
   }
 
   updatePersona(personaData) {
-    return this.sendToServer('updatePersona', personaData);
+    if (!this.socket || !this.connected) {
+      return Promise.reject(new Error('Socket not connected'));
+    }
+    
+    return new Promise((resolve) => {
+      const handleResponse = (response) => {
+        this.socket.off('personaUpdated', handleResponse);
+        resolve(response);
+      };
+      
+      this.socket.once('personaUpdated', handleResponse);
+      this.socket.emit('updatePersona', personaData);
+    });
   }
 
   updateSettings(settingsData) {
-    return this.sendToServer('updateSettings', settingsData);
+    if (!this.socket || !this.connected) {
+      return Promise.reject(new Error('Socket not connected'));
+    }
+    
+    return new Promise((resolve) => {
+      const handleResponse = (response) => {
+        this.socket.off('settingsUpdated', handleResponse);
+        resolve(response);
+      };
+      
+      this.socket.once('settingsUpdated', handleResponse);
+      this.socket.emit('updateSettings', settingsData);
+    });
   }
 
   // Getters

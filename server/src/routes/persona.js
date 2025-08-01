@@ -1,67 +1,96 @@
 const express = require('express');
 const router = express.Router();
+const storage = require('../utils/storage');
 
 // GET /api/persona
-router.get('/', (req, res) => {
-  // Import botData from bot routes
-  const { botData } = require('./bot');
-  
-  res.json({
-    success: true,
-    data: botData.persona
-  });
+router.get('/', async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      data: storage.getPersona()
+    });
+  } catch (error) {
+    console.error('Error getting persona:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get persona'
+    });
+  }
 });
 
 // POST /api/persona
-router.post('/', (req, res) => {
-  const { name, description } = req.body;
-  
-  if (!name || !description) {
-    return res.status(400).json({
+router.post('/', async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    
+    if (!name || !description) {
+      return res.status(400).json({
+        success: false,
+        error: 'Name and description are required'
+      });
+    }
+    
+    const personaData = {
+      name: name.trim(),
+      description: description.trim()
+    };
+    
+    const success = await storage.updatePersona(personaData);
+    
+    if (!success) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to save persona'
+      });
+    }
+    
+    // Add activity log
+    await storage.addActivity(`Persona updated: ${name}`);
+    
+    res.json({
+      success: true,
+      message: 'Persona updated successfully',
+      data: storage.getPersona()
+    });
+  } catch (error) {
+    console.error('Error updating persona:', error);
+    res.status(500).json({
       success: false,
-      error: 'Name and description are required'
+      error: 'Failed to update persona'
     });
   }
-  
-  // Import botData from bot routes
-  const { botData } = require('./bot');
-  
-  botData.persona = {
-    name: name.trim(),
-    description: description.trim()
-  };
-  
-  // Add activity log
-  const activity = {
-    id: Date.now(),
-    message: `Persona updated: ${name}`,
-    timestamp: 'Just now'
-  };
-  botData.recentActivity.unshift(activity);
-  botData.recentActivity = botData.recentActivity.slice(0, 10);
-  
-  res.json({
-    success: true,
-    message: 'Persona updated successfully',
-    data: botData.persona
-  });
 });
 
 // PUT /api/persona
-router.put('/', (req, res) => {
-  const { name, description } = req.body;
-  
-  // Import botData from bot routes
-  const { botData } = require('./bot');
-  
-  if (name !== undefined) botData.persona.name = name.trim();
-  if (description !== undefined) botData.persona.description = description.trim();
-  
-  res.json({
-    success: true,
-    message: 'Persona updated successfully',
-    data: botData.persona
-  });
+router.put('/', async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    
+    const updates = {};
+    if (name !== undefined) updates.name = name.trim();
+    if (description !== undefined) updates.description = description.trim();
+    
+    const success = await storage.updatePersona(updates);
+    
+    if (!success) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to save persona'
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Persona updated successfully',
+      data: storage.getPersona()
+    });
+  } catch (error) {
+    console.error('Error updating persona:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update persona'
+    });
+  }
 });
 
 module.exports = router;

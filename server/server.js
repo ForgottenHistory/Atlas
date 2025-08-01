@@ -19,10 +19,21 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// Import routes
-const { router: botRouter, botData } = require('./src/routes/bot');
+// Import routes and storage
+const { router: botRouter, getBotData, getRuntimeData, updateRuntimeData } = require('./src/routes/bot');
 const personaRouter = require('./src/routes/persona');
 const settingsRouter = require('./src/routes/settings');
+const storage = require('./src/utils/storage');
+
+// Initialize storage once at startup
+const initializeApp = async () => {
+  try {
+    await storage.init();
+    console.log('Application initialized successfully');
+  } catch (error) {
+    console.error('Failed to initialize application:', error);
+  }
+};
 
 // API Routes
 app.use('/api/bot', botRouter);
@@ -39,115 +50,139 @@ app.get('/api/health', (req, res) => {
 });
 
 // Socket.IO connection handling
-io.on('connection', (socket) => {
+io.on('connection', async (socket) => {
   console.log('Client connected:', socket.id);
   
-  // Send initial bot status
-  socket.emit('botStatus', {
-    isConnected: botData.isConnected,
-    activeUsers: botData.activeUsers,
-    messagesToday: botData.messagesToday,
-    uptime: botData.uptime,
-    recentActivity: botData.recentActivity
-  });
-  
-  // Handle bot connection toggle
-  socket.on('toggleBotConnection', () => {
-    botData.isConnected = !botData.isConnected;
-    console.log('Bot connection toggled:', botData.isConnected);
+  try {
+    // Get current data (storage already initialized)
+    const botData = await getBotData();
     
-    // Add activity log
-    const activity = {
-      id: Date.now(),
-      message: `Bot ${botData.isConnected ? 'connected' : 'disconnected'}`,
-      timestamp: 'Just now'
-    };
-    botData.recentActivity.unshift(activity);
-    botData.recentActivity = botData.recentActivity.slice(0, 10);
-    
-    // Broadcast to all clients
-    io.emit('botStatus', {
+    // Send initial bot status
+    socket.emit('botStatus', {
       isConnected: botData.isConnected,
       activeUsers: botData.activeUsers,
       messagesToday: botData.messagesToday,
       uptime: botData.uptime,
       recentActivity: botData.recentActivity
     });
-    
-    io.emit('newActivity', activity);
+  } catch (error) {
+    console.error('Error initializing socket connection:', error);
+  }
+  
+  // Handle bot connection toggle
+  socket.on('toggleBotConnection', async () => {
+    try {
+      const runtimeData = getRuntimeData();
+      runtimeData.isConnected = !runtimeData.isConnected;
+      updateRuntimeData({ isConnected: runtimeData.isConnected });
+      
+      console.log('Bot connection toggled:', runtimeData.isConnected);
+      
+      // Add activity log
+      const activity = await storage.addActivity(
+        `Bot ${runtimeData.isConnected ? 'connected' : 'disconnected'}`
+      );
+      
+      // Broadcast to all clients
+      const botData = await getBotData();
+      io.emit('botStatus', {
+        isConnected: botData.isConnected,
+        activeUsers: botData.activeUsers,
+        messagesToday: botData.messagesToday,
+        uptime: botData.uptime,
+        recentActivity: botData.recentActivity
+      });
+      
+      io.emit('newActivity', activity);
+    } catch (error) {
+      console.error('Error toggling bot connection:', error);
+    }
   });
   
   // Handle persona updates
-  socket.on('updatePersona', (personaData) => {
-    console.log('Persona updated via socket:', personaData);
-    
-    if (personaData.name && personaData.description) {
-      botData.persona = {
-        name: personaData.name.trim(),
-        description: personaData.description.trim()
-      };
+  socket.on('updatePersona', async (personaData) => {
+    try {
+      console.log('Persona updated via socket:', personaData);
       
-      const activity = {
-        id: Date.now(),
-        message: `Persona updated: ${personaData.name}`,
-        timestamp: 'Just now'
-      };
-      botData.recentActivity.unshift(activity);
-      botData.recentActivity = botData.recentActivity.slice(0, 10);
-      
-      socket.emit('personaUpdated', { success: true, data: botData.persona });
-      io.emit('newActivity', activity);
-    } else {
-      socket.emit('personaUpdated', { success: false, error: 'Name and description required' });
+      if (personaData.name && personaData.description) {
+        const updates = {
+          name: personaData.name.trim(),
+          description: personaData.description.trim()
+        };
+        
+        const success = await storage.updatePersona(updates);
+        
+        if (success) {
+          const activity = await storage.addActivity(`Persona updated: ${personaData.name}`);
+          
+          socket.emit('personaUpdated', { success: true, data: storage.getPersona() });
+          io.emit('newActivity', activity);
+        } else {
+          socket.emit('personaUpdated', { success: false, error: 'Failed to save persona' });
+        }
+      } else {
+        socket.emit('personaUpdated', { success: false, error: 'Name and description required' });
+      }
+    } catch (error) {
+      console.error('Error updating persona:', error);
+      socket.emit('personaUpdated', { success: false, error: 'Server error' });
     }
   });
   
   // Handle settings updates
-  socket.on('updateSettings', (settingsData) => {
-    console.log('Settings updated via socket:', settingsData);
-    
-    let updated = [];
-    
-    if (settingsData.botToken !== undefined) {
-      botData.settings.botToken = settingsData.botToken.trim();
-      updated.push('bot token');
-    }
-    
-    if (settingsData.commandPrefix !== undefined) {
-      if (settingsData.commandPrefix.trim()) {
-        botData.settings.commandPrefix = settingsData.commandPrefix.trim();
-        updated.push('command prefix');
-      }
-    }
-    
-    if (updated.length > 0) {
-      const activity = {
-        id: Date.now(),
-        message: `Settings updated: ${updated.join(', ')}`,
-        timestamp: 'Just now'
-      };
-      botData.recentActivity.unshift(activity);
-      botData.recentActivity = botData.recentActivity.slice(0, 10);
+  socket.on('updateSettings', async (settingsData) => {
+    try {
+      console.log('Settings updated via socket:', settingsData);
       
-      socket.emit('settingsUpdated', { success: true });
-      io.emit('newActivity', activity);
-    } else {
-      socket.emit('settingsUpdated', { success: false, error: 'No valid settings provided' });
+      let updated = [];
+      const updates = {};
+      
+      if (settingsData.botToken !== undefined) {
+        updates.botToken = settingsData.botToken.trim();
+        updated.push('bot token');
+      }
+      
+      if (settingsData.commandPrefix !== undefined) {
+        if (settingsData.commandPrefix.trim()) {
+          updates.commandPrefix = settingsData.commandPrefix.trim();
+          updated.push('command prefix');
+        }
+      }
+      
+      if (updated.length > 0) {
+        const success = await storage.updateSettings(updates);
+        
+        if (success) {
+          const activity = await storage.addActivity(`Settings updated: ${updated.join(', ')}`);
+          
+          socket.emit('settingsUpdated', { success: true });
+          io.emit('newActivity', activity);
+        } else {
+          socket.emit('settingsUpdated', { success: false, error: 'Failed to save settings' });
+        }
+      } else {
+        socket.emit('settingsUpdated', { success: false, error: 'No valid settings provided' });
+      }
+    } catch (error) {
+      console.error('Error updating settings:', error);
+      socket.emit('settingsUpdated', { success: false, error: 'Server error' });
     }
   });
   
   // Simulate real-time stats updates
   const statsInterval = setInterval(() => {
-    if (botData.isConnected) {
-      botData.messagesToday += Math.floor(Math.random() * 5);
-      botData.activeUsers += Math.floor(Math.random() * 3) - 1;
+    const runtimeData = getRuntimeData();
+    if (runtimeData.isConnected) {
+      const updates = {
+        messagesToday: runtimeData.messagesToday + Math.floor(Math.random() * 5),
+        activeUsers: Math.max(0, runtimeData.activeUsers + Math.floor(Math.random() * 3) - 1)
+      };
       
-      // Keep activeUsers positive
-      if (botData.activeUsers < 0) botData.activeUsers = 0;
+      updateRuntimeData(updates);
       
       io.emit('statsUpdate', {
-        activeUsers: botData.activeUsers,
-        messagesToday: botData.messagesToday
+        activeUsers: updates.activeUsers,
+        messagesToday: updates.messagesToday
       });
     }
   }, 5000);
@@ -175,7 +210,8 @@ app.use('*', (req, res) => {
   });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`Atlas Bot API running on port ${PORT}`);
   console.log(`Socket.IO server ready for connections`);
+  await initializeApp();
 });
