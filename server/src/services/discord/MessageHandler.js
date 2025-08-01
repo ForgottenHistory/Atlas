@@ -1,10 +1,15 @@
 const storage = require('../../utils/storage');
+const LLMService = require('../llm');
 
 class MessageHandler {
   constructor(discordClient, channelManager) {
     this.discordClient = discordClient;
     this.channelManager = channelManager;
     this.eventHandlers = new Map();
+    this.llmService = new LLMService();
+    this.conversationHistory = new Map(); // channelId -> messages array
+    this.maxHistoryPerChannel = 20;
+    
     this.setupMessageListener();
   }
 
@@ -38,17 +43,19 @@ class MessageHandler {
       }
       
       const settings = storage.getSettings();
-      const persona = storage.getPersona();
       const prefix = settings.commandPrefix || '!';
 
-      // Simple "Hi" response for any non-command message
-      if (!message.content.startsWith(prefix)) {
-        await this.handleRegularMessage(message);
+      // Handle commands first
+      if (message.content.startsWith(prefix)) {
+        await this.handleCommand(message, prefix);
         return;
       }
 
-      // Handle commands
-      await this.handleCommand(message, prefix);
+      // Store message in conversation history
+      this.addToConversationHistory(message);
+
+      // Generate AI response for regular messages
+      await this.handleRegularMessage(message);
       
     } catch (error) {
       console.error('Error handling message:', error);
@@ -57,8 +64,83 @@ class MessageHandler {
   }
 
   async handleRegularMessage(message) {
-    // Respond with "Hi" to any regular message in active channels
-    await message.reply('Hi! 👋');
+    try {
+      // Get all necessary data
+      const settings = storage.getSettings();
+      const persona = storage.getPersona();
+      const llmSettings = storage.getLLMSettings();
+      const conversationHistory = this.getConversationHistory(message.channel.id);
+
+      // Build context for LLM
+      const context = {
+        systemPrompt: llmSettings.systemPrompt || settings.systemPrompt,
+        characterName: persona.name,
+        characterDescription: persona.description,
+        exampleMessages: persona.mes_example,
+        conversationHistory: conversationHistory,
+        llmSettings: llmSettings,
+        maxHistoryLength: 10 // Keep recent conversation context
+      };
+
+      // Generate response using LLM service
+      const result = await this.llmService.generateCharacterResponse(context);
+
+      if (result.success) {
+        const response = await message.reply(result.response);
+        
+        // Add bot response to conversation history
+        this.addToConversationHistory(response, true);
+        
+        // Log activity
+        await storage.addActivity(`AI response generated in #${message.channel.name}`);
+      } else {
+        console.error('LLM generation failed:', result.error);
+        
+        // Use fallback response
+        const fallback = result.fallbackResponse || 'Hi! 👋';
+        await message.reply(fallback);
+        
+        await storage.addActivity(`Fallback response used in #${message.channel.name}`);
+      }
+    } catch (error) {
+      console.error('Error in AI response generation:', error);
+      await message.reply('Hi! 👋').catch(() => {});
+    }
+  }
+
+  addToConversationHistory(message, isBot = false) {
+    const channelId = message.channel.id;
+    
+    if (!this.conversationHistory.has(channelId)) {
+      this.conversationHistory.set(channelId, []);
+    }
+    
+    const history = this.conversationHistory.get(channelId);
+    
+    // Add new message
+    history.push({
+      author: isBot ? (storage.getPersona().name || 'Bot') : message.author.username,
+      content: message.content,
+      timestamp: new Date(),
+      isBot: isBot
+    });
+    
+    // Keep only recent messages
+    if (history.length > this.maxHistoryPerChannel) {
+      history.shift();
+    }
+  }
+
+  getConversationHistory(channelId) {
+    return this.conversationHistory.get(channelId) || [];
+  }
+
+  clearConversationHistory(channelId) {
+    if (channelId) {
+      this.conversationHistory.delete(channelId);
+    } else {
+      this.conversationHistory.clear();
+    }
   }
 
   async handleCommand(message, prefix) {
@@ -77,6 +159,10 @@ class MessageHandler {
       case 'info':
         await this.handleInfoCommand(message);
         break;
+
+      case 'clear':
+        await this.handleClearCommand(message);
+        break;
         
       default:
         await this.handleUnknownCommand(message, command);
@@ -85,6 +171,11 @@ class MessageHandler {
 
     // Log activity
     await storage.addActivity(`Command executed: ${prefix}${command} by ${message.author.username} in #${message.channel.name}`);
+  }
+
+  async handleClearCommand(message) {
+    this.clearConversationHistory(message.channel.id);
+    await message.reply('🧹 Conversation history cleared for this channel.');
   }
 
   async handlePingCommand(message) {
@@ -100,7 +191,8 @@ class MessageHandler {
       fields: [
         { name: `${prefix}ping`, value: 'Check bot response time', inline: true },
         { name: `${prefix}help`, value: 'Show this help message', inline: true },
-        { name: `${prefix}info`, value: 'Show bot information', inline: true }
+        { name: `${prefix}info`, value: 'Show bot information', inline: true },
+        { name: `${prefix}clear`, value: 'Clear conversation history', inline: true }
       ],
       timestamp: new Date().toISOString()
     };
