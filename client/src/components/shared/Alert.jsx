@@ -36,14 +36,14 @@ const Alert = ({
   
   return (
     <div className={`${config.bgColor} ${config.textColor} rounded-lg p-4 ${className}`}>
-      <div className="flex items-start">
+      <div className="flex items-center">
         <div className="flex-shrink-0">
           <Icon className="h-5 w-5" />
         </div>
         
-        <div className="ml-3 flex-1">
+        <div className="ml-3 flex-1 flex items-center">
           {title && (
-            <h3 className="text-sm font-medium mb-1">{title}</h3>
+            <h3 className="text-sm font-medium mr-2">{title}</h3>
           )}
           
           <div className="text-sm">
