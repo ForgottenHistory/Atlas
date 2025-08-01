@@ -48,13 +48,13 @@ function Settings({ onUpdateSettings }) {
     try {
       const result = await onUpdateSettings(formData);
 
-      if (result.success) {
+      if (result && result.success) {
         setMessage({ type: 'success', text: 'Settings updated successfully!' });
         setHasBotToken(true);
         // Clear bot token field for security
         setFormData(prev => ({ ...prev, botToken: '' }));
       } else {
-        setMessage({ type: 'error', text: result.error || 'Failed to update settings' });
+        setMessage({ type: 'error', text: result?.error || 'Failed to update settings' });
       }
     } catch (error) {
       setMessage({ type: 'error', text: 'Failed to update settings. Please try again.' });
@@ -131,7 +131,7 @@ function Settings({ onUpdateSettings }) {
                 <div className="flex items-center gap-2">
                   Bot Token
                   {hasBotToken && (
-                    <span className="text-green-400 text-xs bg-green-400 bg-opacity-20 px-2 py-1 rounded">
+                    <span className="text-green-400 text-xs px-2 py-1 rounded">
                       ✓ Configured
                     </span>
                   )}
