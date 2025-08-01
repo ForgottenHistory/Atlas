@@ -6,10 +6,18 @@ class ResponseFormatter {
   formatCharacterResponse(rawResponse, characterName) {
     if (!rawResponse) return '';
     
+    console.log('Original response:', rawResponse);
+    
     let formatted = rawResponse.trim();
     
-    // Remove character name prefix if LLM included it
-    formatted = this.removeCharacterPrefix(formatted, characterName);
+    // Remove ALL RP actions first (anything between asterisks)
+    formatted = this.removeRPActions(formatted);
+    
+    // Remove character name prefixes and dialogue formatting
+    formatted = this.removeCharacterFormatting(formatted, characterName);
+    
+    // Remove ALL markdown formatting for plain text
+    formatted = this.removeMarkdownFormatting(formatted);
     
     // Clean up common LLM artifacts
     formatted = this.cleanLLMArtifacts(formatted);
@@ -20,31 +28,112 @@ class ResponseFormatter {
     // Final cleanup
     formatted = this.finalCleanup(formatted);
     
+    console.log('Formatted response:', formatted);
+    
     return formatted;
   }
 
-  removeCharacterPrefix(text, characterName) {
-    if (!characterName) return text;
+  removeRPActions(text) {
+    // Remove action descriptions in asterisks
+    let cleaned = text.replace(/\*[^*]*?\*/g, '');
     
-    // Remove "CharacterName:" prefix if present
-    const prefixPattern = new RegExp(`^${this.escapeRegex(characterName)}:\\s*`, 'i');
-    return text.replace(prefixPattern, '');
+    // Remove any remaining standalone asterisks
+    cleaned = cleaned.replace(/\*/g, '');
+    
+    console.log('After removing RP actions:', cleaned);
+    return cleaned;
+  }
+
+  removeCharacterFormatting(text, characterName) {
+    let cleaned = text;
+    
+    // Remove lines that start with ">" (quote indicators common in RP)
+    cleaned = cleaned.replace(/^>\s*/gm, '');
+    
+    if (characterName) {
+      const namePattern = this.escapeRegex(characterName);
+      
+      // Comprehensive patterns for character name removal
+      const patterns = [
+        // Character name with emotion: "Viper (playfully):"
+        new RegExp(`^\\s*${namePattern}\\s*\\([^)]*\\)\\s*:\\s*`, 'gmi'),
+        
+        // Simple character name: "Viper:"
+        new RegExp(`^\\s*${namePattern}\\s*:\\s*`, 'gmi'),
+        
+        // With quotes: 'Viper (playfully): "'
+        new RegExp(`^\\s*${namePattern}\\s*\\([^)]*\\)\\s*:\\s*["']`, 'gmi'),
+        new RegExp(`^\\s*${namePattern}\\s*:\\s*["']`, 'gmi'),
+      ];
+      
+      for (const pattern of patterns) {
+        const before = cleaned;
+        cleaned = cleaned.replace(pattern, '');
+        if (before !== cleaned) {
+          console.log(`Character pattern matched and removed`);
+        }
+      }
+    }
+    
+    // Generic patterns for any character name format
+    const genericPatterns = [
+      // Any name with emotion in parentheses
+      /^[A-Za-z\s]+\s*\([^)]*\)\s*:\s*/gmi,
+      
+      // Any single word followed by colon (likely a character name)
+      /^[A-Za-z]+\s*:\s*/gmi
+    ];
+    
+    for (const pattern of genericPatterns) {
+      const before = cleaned;
+      cleaned = cleaned.replace(pattern, '');
+      if (before !== cleaned) {
+        console.log(`Generic character pattern matched and removed`);
+      }
+    }
+    
+    console.log('After removing character formatting:', cleaned);
+    return cleaned;
+  }
+
+  removeMarkdownFormatting(text) {
+    return text
+      // Remove bold **text**
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      
+      // Remove italic *text*
+      .replace(/\*(.*?)\*/g, '$1')
+      
+      // Remove italic _text_
+      .replace(/_(.*?)_/g, '$1')
+      
+      // Remove strikethrough ~~text~~
+      .replace(/~~(.*?)~~/g, '$1')
+      
+      // Remove code `text`
+      .replace(/`(.*?)`/g, '$1')
+      
+      // Remove any remaining markdown symbols
+      .replace(/[*_~`]/g, '');
   }
 
   cleanLLMArtifacts(text) {
-    // Remove common LLM artifacts
     return text
-      // Remove action indicators like *does something*
-      .replace(/^\*.*?\*\s*/g, '')
+      // Remove surrounding quotes if entire message is quoted
+      .replace(/^["'"](.*?)["'"]$/s, '$1')
       
-      // Remove quotation marks if the entire response is quoted
-      .replace(/^"(.*)"$/s, '$1')
+      // Remove dialogue dashes
+      .replace(/^[-–—]\s*/gm, '')
       
       // Remove trailing periods from single word responses
       .replace(/^(\w+)\.$/, '$1')
       
-      // Clean up extra whitespace
+      // Clean up multiple spaces
       .replace(/\s+/g, ' ')
+      
+      // Remove multiple line breaks
+      .replace(/\n\s*\n\s*\n/g, '\n\n')
+      
       .trim();
   }
 
@@ -75,19 +164,22 @@ class ResponseFormatter {
   finalCleanup(text) {
     return text
       .trim()
+      // Remove multiple consecutive spaces
+      .replace(/\s+/g, ' ')
       // Remove multiple consecutive newlines
       .replace(/\n{3,}/g, '\n\n')
-      // Ensure no trailing whitespace on lines
+      // Clean up line breaks
       .split('\n')
-      .map(line => line.trimEnd())
-      .join('\n');
+      .map(line => line.trim())
+      .filter(line => line.length > 0) // Remove empty lines
+      .join(' ') // Join all into single line for Discord
+      .trim();
   }
 
   escapeRegex(string) {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  // Utility to check if response seems reasonable
   validateResponse(response) {
     const issues = [];
     
@@ -101,13 +193,6 @@ class ResponseFormatter {
     
     if (response.length > this.maxResponseLength * 1.5) {
       issues.push('Response too long');
-    }
-    
-    // Check for repetitive content
-    const words = response.toLowerCase().split(/\s+/);
-    const uniqueWords = new Set(words);
-    if (words.length > 10 && uniqueWords.size / words.length < 0.3) {
-      issues.push('Response appears repetitive');
     }
     
     return {
