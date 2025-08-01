@@ -1,5 +1,10 @@
 // LLM settings validation rules
 const VALIDATION_RULES = {
+  systemPrompt: {
+    type: 'string',
+    maxLength: 8000,
+    description: 'System prompt must be under 8000 characters'
+  },
   temperature: {
     min: 0,
     max: 2,
@@ -49,7 +54,7 @@ const VALIDATION_RULES = {
  * Validates a single LLM setting value
  * @param {string} key - Setting name
  * @param {any} value - Setting value
- * @returns {Object} - { isValid: boolean, error?: string, validatedValue?: number }
+ * @returns {Object} - { isValid: boolean, error?: string, validatedValue?: any }
  */
 function validateSetting(key, value) {
   const rule = VALIDATION_RULES[key];
@@ -57,7 +62,20 @@ function validateSetting(key, value) {
     return { isValid: false, error: `Unknown setting: ${key}` };
   }
 
-  // Convert value based on type
+  // Handle string type (system prompt)
+  if (rule.type === 'string') {
+    if (typeof value !== 'string') {
+      return { isValid: false, error: `${key} must be a string` };
+    }
+    
+    if (rule.maxLength && value.length > rule.maxLength) {
+      return { isValid: false, error: rule.description };
+    }
+    
+    return { isValid: true, validatedValue: value };
+  }
+
+  // Handle numeric types
   let numValue;
   if (rule.type === 'integer') {
     numValue = parseInt(value);
@@ -76,7 +94,7 @@ function validateSetting(key, value) {
       return { isValid: false, error: rule.description };
     }
   } else {
-    // Check range for other settings
+    // Check range for other numeric settings
     if (numValue < rule.min || numValue > rule.max) {
       return { isValid: false, error: rule.description };
     }
@@ -100,8 +118,14 @@ function validateLLMSettings(settings) {
 
   // Validate each provided setting
   for (const [key, value] of Object.entries(settings)) {
-    if (value === undefined || value === null || value === '') {
-      continue; // Skip empty values
+    // Skip empty values for optional settings, but allow empty strings for systemPrompt
+    if (key !== 'systemPrompt' && (value === undefined || value === null || value === '')) {
+      continue;
+    }
+    
+    // For systemPrompt, allow empty string but validate if provided
+    if (key === 'systemPrompt' && (value === undefined || value === null)) {
+      continue;
     }
 
     const result = validateSetting(key, value);
@@ -126,6 +150,7 @@ function validateLLMSettings(settings) {
  */
 function getDefaultLLMSettings() {
   return {
+    systemPrompt: '',
     temperature: 0.6,
     top_p: 1,
     repetition_penalty: 1
