@@ -94,13 +94,26 @@ class DiscordBot {
 
   async handleMessage(message) {
     try {
+      // Skip bot messages
+      if (message.author.bot) return;
+      
+      // Check if this channel is active
+      if (!this.isChannelActive(message.channel.id)) {
+        return; // Don't respond in inactive channels
+      }
+      
       const settings = storage.getSettings();
       const persona = storage.getPersona();
       const prefix = settings.commandPrefix || '!';
 
-      // Check if message starts with command prefix
-      if (!message.content.startsWith(prefix)) return;
+      // Simple "Hi" response for any non-command message
+      if (!message.content.startsWith(prefix)) {
+        // Respond with "Hi" to any regular message in active channels
+        await message.reply('Hi! 👋');
+        return;
+      }
 
+      // Handle commands
       const args = message.content.slice(prefix.length).trim().split(/ +/);
       const command = args.shift().toLowerCase();
 
@@ -142,16 +155,18 @@ class DiscordBot {
           // Handle unknown commands or custom persona responses
           if (persona.name && persona.description) {
             await message.reply(`I'm ${persona.name}! ${persona.description.slice(0, 100)}...`);
+          } else {
+            await message.reply("I don't recognize that command. Try `!help` for available commands.");
           }
           break;
       }
 
       // Log activity
-      await storage.addActivity(`Command executed: ${prefix}${command} by ${message.author.username}`);
+      await storage.addActivity(`Command executed: ${prefix}${command} by ${message.author.username} in #${message.channel.name}`);
       
     } catch (error) {
       console.error('Error handling message:', error);
-      await message.reply('Sorry, something went wrong processing that command.').catch(() => {});
+      await message.reply('Sorry, something went wrong processing that message.').catch(() => {});
     }
   }
 
