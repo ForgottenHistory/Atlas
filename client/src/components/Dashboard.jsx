@@ -1,9 +1,10 @@
 import { MessageSquare, Users, Activity } from 'lucide-react';
 import { StatCard, Card } from './shared';
+import LogViewer from './dashboard/LogViewer';
 
-function Dashboard({ stats, recentActivity }) {
+function Dashboard({ stats, recentActivity, socketService }) {
   return (
-    <div>
+    <div className="h-full flex flex-col">
       <h2 className="text-2xl font-bold mb-6">Dashboard</h2>
       
       {/* Stats Cards */}
@@ -30,38 +31,44 @@ function Dashboard({ stats, recentActivity }) {
         />
       </div>
 
-      {/* Recent Activity */}
-      <Card>
-        <Card.Header>
-          <Card.Title>Recent Activity</Card.Title>
-        </Card.Header>
-        
-        <Card.Content>
-          <div className="space-y-3">
-            {recentActivity && recentActivity.length > 0 ? (
-              recentActivity.map((activity, index) => (
-                <div key={activity.id ? `activity-${activity.id}` : `activity-index-${index}`} className="bg-gray-700 rounded-lg p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-white">{activity.message || 'Unknown activity'}</p>
-                      <p className="text-gray-400 text-sm">{activity.timestamp || 'Unknown time'}</p>
+      {/* Main Content Grid - Equal Heights */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 flex-1 min-h-0">
+        {/* Recent Activity */}
+        <Card className="h-full flex flex-col">
+          <Card.Header className="flex-shrink-0">
+            <Card.Title>Recent Activity</Card.Title>
+          </Card.Header>
+          
+          <Card.Content className="flex-1 overflow-y-auto">
+            <div className="space-y-3">
+              {recentActivity && recentActivity.length > 0 ? (
+                recentActivity.map((activity, index) => (
+                  <div key={activity.id ? `activity-${activity.id}` : `activity-index-${index}`} className="bg-gray-700 rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-white">{activity.message || 'Unknown activity'}</p>
+                        <p className="text-gray-400 text-sm">{activity.timestamp || 'Unknown time'}</p>
+                      </div>
+                      <div className="w-2 h-2 bg-green-500 rounded-full flex-shrink-0"></div>
                     </div>
-                    <div className="w-2 h-2 bg-green-500 rounded-full flex-shrink-0"></div>
+                  </div>
+                ))
+              ) : (
+                <div className="bg-gray-700 rounded-lg p-8 text-center">
+                  <div className="text-gray-400">
+                    <Activity className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                    <p className="text-lg font-medium">No recent activity</p>
+                    <p className="text-sm">Activity will appear here when your bot is active</p>
                   </div>
                 </div>
-              ))
-            ) : (
-              <div className="bg-gray-700 rounded-lg p-8 text-center">
-                <div className="text-gray-400">
-                  <Activity className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                  <p className="text-lg font-medium">No recent activity</p>
-                  <p className="text-sm">Activity will appear here when your bot is active</p>
-                </div>
-              </div>
-            )}
-          </div>
-        </Card.Content>
-      </Card>
+              )}
+            </div>
+          </Card.Content>
+        </Card>
+
+        {/* System Logs */}
+        <LogViewer socketService={socketService} />
+      </div>
     </div>
   );
 }

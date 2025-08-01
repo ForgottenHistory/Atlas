@@ -37,7 +37,13 @@ function App() {
  const renderActiveTab = () => {
    switch (activeTab) {
      case 'dashboard':
-       return <Dashboard stats={botStatus || {}} recentActivity={recentActivity || []} />;
+       return (
+         <Dashboard 
+           stats={botStatus || {}} 
+           recentActivity={recentActivity || []} 
+           socketService={socketService}
+         />
+       );
      case 'persona':
        return <Persona onUpdatePersona={updatePersona} />;
      case 'channels':
@@ -45,7 +51,13 @@ function App() {
      case 'settings':
        return <Settings onUpdateSettings={updateSettings} />;
      default:
-       return <Dashboard stats={botStatus || {}} recentActivity={recentActivity || []} />;
+       return (
+         <Dashboard 
+           stats={botStatus || {}} 
+           recentActivity={recentActivity || []} 
+           socketService={socketService}
+         />
+       );
    }
  };
 

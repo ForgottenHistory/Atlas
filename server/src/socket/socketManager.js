@@ -2,6 +2,7 @@ const socketIo = require('socket.io');
 const SocketHandlers = require('./socketHandlers');
 const { getBotData, getRuntimeData, updateRuntimeData } = require('../routes/bot');
 const discordService = require('../services/discord');
+const logger = require('../services/logger/Logger');
 
 class SocketManager {
   constructor(server) {
@@ -16,12 +17,23 @@ class SocketManager {
     this.setupDiscordEventHandlers();
     this.setupSocketHandlers();
     this.startStatsUpdates();
+    
+    // Log socket manager initialization
+    logger.info('Socket.IO manager initialized', { 
+      source: 'system',
+      cors: 'http://localhost:5173'
+    });
   }
 
   setupDiscordEventHandlers() {
     // Discord bot event handlers for socket.io
     discordService.on('botConnected', (data) => {
-      console.log('Discord bot connected, notifying clients');
+      logger.success('Discord bot connected', { 
+        source: 'discord',
+        username: data.username,
+        guilds: data.guilds
+      });
+      
       updateRuntimeData({ isConnected: true });
       this.io.emit('botStatus', { 
         ...getRuntimeData(), 
@@ -31,13 +43,18 @@ class SocketManager {
     });
 
     discordService.on('botDisconnected', () => {
-      console.log('Discord bot disconnected, notifying clients');
+      logger.warn('Discord bot disconnected', { source: 'discord' });
+      
       updateRuntimeData({ isConnected: false });
       this.io.emit('botStatus', getRuntimeData());
     });
 
     discordService.on('botError', (data) => {
-      console.log('Discord bot error:', data.error);
+      logger.error('Discord bot error', { 
+        source: 'discord',
+        error: data.error
+      });
+      
       this.io.emit('botError', data);
     });
 
@@ -46,6 +63,13 @@ class SocketManager {
       const runtimeData = getRuntimeData();
       updateRuntimeData({ 
         messagesToday: runtimeData.messagesToday + 1 
+      });
+      
+      logger.info('Message received and processed', {
+        source: 'discord',
+        author: data.author,
+        guild: data.guild,
+        channel: data.channel
       });
       
       // Notify clients
@@ -64,7 +88,11 @@ class SocketManager {
 
   setupSocketHandlers() {
     this.io.on('connection', async (socket) => {
-      console.log('Client connected:', socket.id);
+      logger.info('Client connected', { 
+        source: 'system',
+        socketId: socket.id,
+        clientIP: socket.handshake.address
+      });
       
       try {
         // Get current data and send initial status
@@ -81,7 +109,11 @@ class SocketManager {
           guilds: discordStatus.guilds
         });
       } catch (error) {
-        console.error('Error initializing socket connection:', error);
+        logger.error('Error initializing socket connection', {
+          source: 'system',
+          socketId: socket.id,
+          error: error.message
+        });
       }
 
       // Register event handlers
@@ -92,9 +124,17 @@ class SocketManager {
       socket.on('getChannels', (data) => this.handlers.handleGetChannels(socket, data));
       socket.on('updateActiveChannels', (data) => this.handlers.handleUpdateActiveChannels(socket, data));
       socket.on('getBotStatus', () => this.handlers.handleGetBotStatus(socket));
+      
+      // Log-specific event handlers
+      socket.on('getLogs', (data) => this.handlers.handleGetLogs(socket, data));
+      socket.on('clearLogs', () => this.handlers.handleClearLogs(socket));
 
-      socket.on('disconnect', () => {
-        console.log('Client disconnected:', socket.id);
+      socket.on('disconnect', (reason) => {
+        logger.info('Client disconnected', { 
+          source: 'system',
+          socketId: socket.id,
+          reason: reason
+        });
       });
     });
   }

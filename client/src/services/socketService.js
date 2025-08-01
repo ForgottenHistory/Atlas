@@ -62,6 +62,59 @@ class SocketService {
       console.error('Connection error:', error);
       this.emit('connection', { connected: false, error: error.message });
     });
+
+    // Set up server event listeners that forward to internal listeners
+    this.socket.on('newLog', (data) => {
+      console.log('Socket received newLog:', data);
+      this.emit('newLog', data);
+    });
+
+    this.socket.on('logsData', (data) => {
+      console.log('Socket received logsData:', data);
+      this.emit('logsData', data);
+    });
+
+    this.socket.on('logsCleared', () => {
+      console.log('Socket received logsCleared');
+      this.emit('logsCleared');
+    });
+
+    // Other existing events
+    this.socket.on('botStatus', (data) => {
+      this.emit('botStatus', data);
+    });
+
+    this.socket.on('statsUpdate', (data) => {
+      this.emit('statsUpdate', data);
+    });
+
+    this.socket.on('newActivity', (data) => {
+      this.emit('newActivity', data);
+    });
+
+    this.socket.on('personaUpdated', (data) => {
+      this.emit('personaUpdated', data);
+    });
+
+    this.socket.on('settingsUpdated', (data) => {
+      this.emit('settingsUpdated', data);
+    });
+
+    this.socket.on('serversData', (data) => {
+      this.emit('serversData', data);
+    });
+
+    this.socket.on('channelsData', (data) => {
+      this.emit('channelsData', data);
+    });
+
+    this.socket.on('activeChannelsUpdated', (data) => {
+      this.emit('activeChannelsUpdated', data);
+    });
+
+    this.socket.on('botError', (data) => {
+      this.emit('botError', data);
+    });
   }
 
   // Event emission
@@ -99,13 +152,15 @@ class SocketService {
 
   // Socket.IO specific methods
   listenToServer(event, callback) {
-    if (!this.socket) return;
+    console.log(`Setting up server listener for: ${event}`);
+    
+    if (!this.socket) {
+      console.warn(`Cannot listen to ${event}: socket not initialized`);
+      return;
+    }
 
-    this.socket.on(event, (data) => {
-      callback(data);
-      // Also emit to internal listeners
-      this.emit(event, data);
-    });
+    // Use the internal event system instead of direct socket listening
+    return this.on(event, callback);
   }
 
   sendToServer(event, data) {
@@ -114,29 +169,9 @@ class SocketService {
       return Promise.reject(new Error('Socket not connected'));
     }
 
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Request timeout'));
-      }, 10000);
-
-      this.socket.emit(event, data);
-
-      // Listen for response events
-      const responseEvent = event.replace(/([A-Z])/g, '_$1').toLowerCase() + 'd';
-
-      const handleResponse = (response) => {
-        clearTimeout(timeout);
-        this.socket.off(responseEvent, handleResponse);
-
-        if (response && response.success !== undefined) {
-          resolve(response);
-        } else {
-          resolve({ success: true }); // Default success for events without explicit response
-        }
-      };
-
-      this.socket.once(responseEvent, handleResponse);
-    });
+    console.log(`Sending to server: ${event}`, data);
+    this.socket.emit(event, data);
+    return Promise.resolve({ success: true });
   }
 
   // Bot-specific methods

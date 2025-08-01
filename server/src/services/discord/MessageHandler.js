@@ -1,5 +1,6 @@
 const storage = require('../../utils/storage');
 const LLMService = require('../llm');
+const logger = require('../logger/Logger');
 
 class MessageHandler {
   constructor(discordClient, channelManager) {
@@ -11,6 +12,11 @@ class MessageHandler {
     this.maxHistoryPerChannel = 20;
     
     this.setupMessageListener();
+    
+    logger.info('MessageHandler initialized', { 
+      source: 'discord',
+      maxHistoryPerChannel: this.maxHistoryPerChannel
+    });
   }
 
   setupMessageListener() {
@@ -39,7 +45,12 @@ class MessageHandler {
       
       // Check if this channel is active
       if (!this.channelManager.isChannelActive(message.channel.id)) {
-        return; // Don't respond in inactive channels
+        logger.debug('Message in inactive channel ignored', {
+          source: 'discord',
+          channel: message.channel.name,
+          author: message.author.username
+        });
+        return;
       }
       
       const settings = storage.getSettings();
@@ -58,13 +69,28 @@ class MessageHandler {
       await this.handleRegularMessage(message);
       
     } catch (error) {
-      console.error('Error handling message:', error);
+      logger.error('Error handling message', {
+        source: 'discord',
+        error: error.message,
+        stack: error.stack,
+        messageId: message.id,
+        author: message.author.username,
+        channel: message.channel.name
+      });
+      
       await message.reply('Sorry, something went wrong processing that message.').catch(() => {});
     }
   }
 
   async handleRegularMessage(message) {
     try {
+      logger.debug('Processing regular message for AI response', {
+        source: 'discord',
+        author: message.author.username,
+        channel: message.channel.name,
+        contentLength: message.content.length
+      });
+
       // Get all necessary data
       const settings = storage.getSettings();
       const persona = storage.getPersona();
@@ -79,14 +105,29 @@ class MessageHandler {
         exampleMessages: persona.mes_example,
         conversationHistory: conversationHistory,
         llmSettings: llmSettings,
-        maxHistoryLength: 10 // Keep recent conversation context
+        maxHistoryLength: 10
       };
 
       // Generate response using LLM service
+      logger.info('Generating AI response', {
+        source: 'llm',
+        character: persona.name || 'Unknown',
+        historyLength: conversationHistory.length,
+        channel: message.channel.name
+      });
+
       const result = await this.llmService.generateCharacterResponse(context);
 
       if (result.success) {
         const response = await message.reply(result.response);
+        
+        logger.success('AI response sent successfully', {
+          source: 'llm',
+          character: persona.name || 'Bot',
+          responseLength: result.response.length,
+          channel: message.channel.name,
+          promptLength: result.metadata?.promptLength
+        });
         
         // Add bot response to conversation history
         this.addToConversationHistory(response, true);
@@ -94,7 +135,12 @@ class MessageHandler {
         // Log activity
         await storage.addActivity(`AI response generated in #${message.channel.name}`);
       } else {
-        console.error('LLM generation failed:', result.error);
+        logger.error('LLM generation failed', {
+          source: 'llm',
+          error: result.error,
+          channel: message.channel.name,
+          fallbackUsed: !!result.fallbackResponse
+        });
         
         // Use fallback response
         const fallback = result.fallbackResponse || 'Hi! 👋';
@@ -103,7 +149,14 @@ class MessageHandler {
         await storage.addActivity(`Fallback response used in #${message.channel.name}`);
       }
     } catch (error) {
-      console.error('Error in AI response generation:', error);
+      logger.error('Error in AI response generation', {
+        source: 'llm',
+        error: error.message,
+        stack: error.stack,
+        channel: message.channel.name,
+        author: message.author.username
+      });
+      
       await message.reply('Hi! 👋').catch(() => {});
     }
   }
@@ -129,6 +182,13 @@ class MessageHandler {
     if (history.length > this.maxHistoryPerChannel) {
       history.shift();
     }
+
+    logger.debug('Added message to conversation history', {
+      source: 'discord',
+      channelId: channelId,
+      historyLength: history.length,
+      isBot: isBot
+    });
   }
 
   getConversationHistory(channelId) {
@@ -138,14 +198,27 @@ class MessageHandler {
   clearConversationHistory(channelId) {
     if (channelId) {
       this.conversationHistory.delete(channelId);
+      logger.info('Conversation history cleared for channel', {
+        source: 'discord',
+        channelId: channelId
+      });
     } else {
       this.conversationHistory.clear();
+      logger.info('All conversation history cleared', { source: 'discord' });
     }
   }
 
   async handleCommand(message, prefix) {
     const args = message.content.slice(prefix.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
+
+    logger.info('Command executed', {
+      source: 'discord',
+      command: command,
+      author: message.author.username,
+      channel: message.channel.name,
+      args: args
+    });
 
     switch (command) {
       case 'ping':
@@ -176,12 +249,24 @@ class MessageHandler {
   async handleClearCommand(message) {
     this.clearConversationHistory(message.channel.id);
     await message.reply('🧹 Conversation history cleared for this channel.');
+    
+    logger.info('Conversation history cleared via command', {
+      source: 'discord',
+      channel: message.channel.name,
+      author: message.author.username
+    });
   }
 
   async handlePingCommand(message) {
     const sent = await message.reply('Pinging...');
     const timeDiff = sent.createdTimestamp - message.createdTimestamp;
     await sent.edit(`Pong! 🏓 Latency: ${timeDiff}ms`);
+    
+    logger.debug('Ping command executed', {
+      source: 'discord',
+      latency: timeDiff,
+      channel: message.channel.name
+    });
   }
 
   async handleHelpCommand(message, prefix) {
@@ -225,6 +310,13 @@ class MessageHandler {
     } else {
       await message.reply("I don't recognize that command. Try `!help` for available commands.");
     }
+
+    logger.warn('Unknown command executed', {
+      source: 'discord',
+      command: command,
+      author: message.author.username,
+      channel: message.channel.name
+    });
   }
 
   formatUptime(uptime) {
@@ -253,7 +345,11 @@ class MessageHandler {
       try {
         handler(data);
       } catch (error) {
-        console.error(`Error in message handler event for ${event}:`, error);
+        logger.error('Error in message handler event', {
+          source: 'discord',
+          event: event,
+          error: error.message
+        });
       }
     });
   }
