@@ -268,7 +268,10 @@ class DiscordBot {
     }
 
     return guild.channels.cache
-      .filter(channel => channel.type !== 4) // Exclude category channels for now
+      .filter(channel => 
+        channel.type !== 4 && // Exclude category channels
+        channel.type !== 2    // Exclude voice channels
+      )
       .map(channel => ({
         id: channel.id,
         name: channel.name,
@@ -276,7 +279,6 @@ class DiscordBot {
         topic: channel.topic || null,
         parentId: channel.parentId,
         position: channel.position,
-        memberCount: channel.type === 2 ? channel.members?.size : null, // Voice channels
         nsfw: channel.nsfw || false
       }))
       .sort((a, b) => a.position - b.position);
