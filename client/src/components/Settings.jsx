@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Key, Hash, Save, RotateCcw } from 'lucide-react';
 import { Button, Input, Alert, Card } from './shared';
+import LLMConfig from './settings/LLMConfig';
 
 function Settings({ onUpdateSettings }) {
   const [formData, setFormData] = useState({
@@ -40,7 +41,7 @@ function Settings({ onUpdateSettings }) {
     });
   };
 
-  const handleSubmit = async (e) => {
+  const handleBotSettingsSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
     setMessage({ type: '', text: '' });
@@ -49,16 +50,36 @@ function Settings({ onUpdateSettings }) {
       const result = await onUpdateSettings(formData);
 
       if (result && result.success) {
-        setMessage({ type: 'success', text: 'Settings updated successfully!' });
+        setMessage({ type: 'success', text: 'Bot settings updated successfully!' });
         setHasBotToken(true);
         // Clear bot token field for security
         setFormData(prev => ({ ...prev, botToken: '' }));
       } else {
-        setMessage({ type: 'error', text: result?.error || 'Failed to update settings' });
+        setMessage({ type: 'error', text: result?.error || 'Failed to update bot settings' });
       }
     } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to update settings. Please try again.' });
+      setMessage({ type: 'error', text: 'Failed to update bot settings. Please try again.' });
       console.error('Settings update error:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleLLMSettingsUpdate = async (llmSettings) => {
+    setIsSubmitting(true);
+    setMessage({ type: '', text: '' });
+
+    try {
+      const result = await onUpdateSettings(llmSettings);
+
+      if (result && result.success) {
+        setMessage({ type: 'success', text: 'LLM settings updated successfully!' });
+      } else {
+        setMessage({ type: 'error', text: result?.error || 'Failed to update LLM settings' });
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Failed to update LLM settings. Please try again.' });
+      console.error('LLM settings update error:', error);
     } finally {
       setIsSubmitting(false);
     }
@@ -114,70 +135,79 @@ function Settings({ onUpdateSettings }) {
         </Alert>
       )}
       
-      <Card>
-        <Card.Header>
-          <Card.Title>Bot Configuration</Card.Title>
-          <p className="text-gray-400 text-sm mt-1">
-            Configure your Discord bot settings and authentication
-          </p>
-        </Card.Header>
-        
-        <Card.Content>
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <Input
-              name="botToken"
-              type="password"
-              label={
-                <div className="flex items-center gap-2">
-                  Bot Token
-                  {hasBotToken && (
-                    <span className="text-green-400 text-xs px-2 py-1 rounded">
-                      ✓ Configured
-                    </span>
-                  )}
-                </div>
-              }
-              value={formData.botToken}
-              onChange={handleInputChange}
-              placeholder={hasBotToken ? "Enter new token to replace..." : "Enter bot token..."}
-              icon={<Key className="h-4 w-4" />}
-              helperText="Your bot token is stored securely and never displayed"
-            />
-            
-            <Input
-              name="commandPrefix"
-              label="Command Prefix"
-              value={formData.commandPrefix}
-              onChange={handleInputChange}
-              placeholder="!"
-              icon={<Hash className="h-4 w-4" />}
-              required
-              helperText="Character that triggers bot commands (e.g. !help)"
-            />
-          </form>
-        </Card.Content>
-        
-        <Card.Footer>
-          <div className="flex gap-3">
-            <Button 
-              onClick={handleSubmit}
-              loading={isSubmitting}
-              icon={<Save className="h-4 w-4" />}
-            >
-              Save Settings
-            </Button>
-            
-            <Button 
-              variant="danger"
-              onClick={handleReset}
-              disabled={isSubmitting}
-              icon={<RotateCcw className="h-4 w-4" />}
-            >
-              Reset to Defaults
-            </Button>
-          </div>
-        </Card.Footer>
-      </Card>
+      <div className="space-y-8">
+        {/* Bot Configuration */}
+        <Card>
+          <Card.Header>
+            <Card.Title>Bot Configuration</Card.Title>
+            <p className="text-gray-400 text-sm mt-1">
+              Configure your Discord bot settings and authentication
+            </p>
+          </Card.Header>
+          
+          <Card.Content>
+            <form onSubmit={handleBotSettingsSubmit} className="space-y-6">
+              <Input
+                name="botToken"
+                type="password"
+                label={
+                  <div className="flex items-center gap-2">
+                    Bot Token
+                    {hasBotToken && (
+                      <span className="text-green-400 text-xs px-2 py-1 rounded">
+                        ✓ Configured
+                      </span>
+                    )}
+                  </div>
+                }
+                value={formData.botToken}
+                onChange={handleInputChange}
+                placeholder={hasBotToken ? "Enter new token to replace..." : "Enter bot token..."}
+                icon={<Key className="h-4 w-4" />}
+                helperText="Your bot token is stored securely and never displayed"
+              />
+              
+              <Input
+                name="commandPrefix"
+                label="Command Prefix"
+                value={formData.commandPrefix}
+                onChange={handleInputChange}
+                placeholder="!"
+                icon={<Hash className="h-4 w-4" />}
+                required
+                helperText="Character that triggers bot commands (e.g. !help)"
+              />
+            </form>
+          </Card.Content>
+          
+          <Card.Footer>
+            <div className="flex gap-3">
+              <Button 
+                onClick={handleBotSettingsSubmit}
+                loading={isSubmitting}
+                icon={<Save className="h-4 w-4" />}
+              >
+                Save Bot Settings
+              </Button>
+              
+              <Button 
+                variant="danger"
+                onClick={handleReset}
+                disabled={isSubmitting}
+                icon={<RotateCcw className="h-4 w-4" />}
+              >
+                Reset All Settings
+              </Button>
+            </div>
+          </Card.Footer>
+        </Card>
+
+        {/* LLM Configuration */}
+        <LLMConfig 
+          onUpdateSettings={handleLLMSettingsUpdate}
+          isSubmitting={isSubmitting}
+        />
+      </div>
     </div>
   );
 }
