@@ -6,8 +6,10 @@ export const useSocket = () => {
   const [connectionError, setConnectionError] = useState(null);
 
   useEffect(() => {
-    // Connect to socket
-    socketService.connect();
+    // Only connect if not already connected
+    if (!socketService.isConnected()) {
+      socketService.connect();
+    }
 
     // Listen for connection status changes
     const unsubscribeConnection = socketService.on('connection', (status) => {
@@ -19,10 +21,13 @@ export const useSocket = () => {
       }
     });
 
-    // Cleanup on unmount
+    // Set initial connection state
+    setIsConnected(socketService.isConnected());
+
+    // Cleanup on unmount - only unsubscribe, don't disconnect
     return () => {
       unsubscribeConnection();
-      socketService.disconnect();
+      // Don't disconnect here as other components might be using the socket
     };
   }, []);
 

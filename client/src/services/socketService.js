@@ -8,16 +8,27 @@ class SocketService {
   }
 
   connect(url = 'http://localhost:3001') {
-    if (this.socket) {
-      this.disconnect();
+    // Don't create new connection if already connected
+    if (this.socket && this.socket.connected) {
+      console.log('Socket already connected');
+      return this.socket;
     }
 
+    // Clean up any existing socket first
+    if (this.socket) {
+      this.socket.removeAllListeners();
+      this.socket.disconnect();
+    }
+
+    console.log('Creating new socket connection...');
     this.socket = io(url, {
       autoConnect: true,
       reconnection: true,
       reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
       reconnectionAttempts: 5,
       timeout: 20000,
+      forceNew: true // Force a new connection
     });
 
     this.setupEventListeners();
@@ -78,7 +89,7 @@ class SocketService {
 
   off(event, callback) {
     if (!this.listeners.has(event)) return;
-    
+
     const callbacks = this.listeners.get(event);
     const index = callbacks.indexOf(callback);
     if (index > -1) {
@@ -89,7 +100,7 @@ class SocketService {
   // Socket.IO specific methods
   listenToServer(event, callback) {
     if (!this.socket) return;
-    
+
     this.socket.on(event, (data) => {
       callback(data);
       // Also emit to internal listeners
@@ -109,14 +120,14 @@ class SocketService {
       }, 10000);
 
       this.socket.emit(event, data);
-      
+
       // Listen for response events
       const responseEvent = event.replace(/([A-Z])/g, '_$1').toLowerCase() + 'd';
-      
+
       const handleResponse = (response) => {
         clearTimeout(timeout);
         this.socket.off(responseEvent, handleResponse);
-        
+
         if (response && response.success !== undefined) {
           resolve(response);
         } else {
@@ -141,13 +152,13 @@ class SocketService {
     if (!this.socket || !this.connected) {
       return Promise.reject(new Error('Socket not connected'));
     }
-    
+
     return new Promise((resolve) => {
       const handleResponse = (response) => {
         this.socket.off('personaUpdated', handleResponse);
         resolve(response);
       };
-      
+
       this.socket.once('personaUpdated', handleResponse);
       this.socket.emit('updatePersona', personaData);
     });
@@ -157,13 +168,13 @@ class SocketService {
     if (!this.socket || !this.connected) {
       return Promise.reject(new Error('Socket not connected'));
     }
-    
+
     return new Promise((resolve) => {
       const handleResponse = (response) => {
         this.socket.off('settingsUpdated', handleResponse);
         resolve(response);
       };
-      
+
       this.socket.once('settingsUpdated', handleResponse);
       this.socket.emit('updateSettings', settingsData);
     });
