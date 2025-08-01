@@ -10,21 +10,21 @@ function Dashboard({ stats, recentActivity }) {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <StatCard
           title="Active Users"
-          value={stats.activeUsers}
+          value={stats.activeUsers || 0}
           icon={Users}
           iconColor="text-blue-400"
         />
         
         <StatCard
           title="Messages Today"
-          value={stats.messagesToday}
+          value={stats.messagesToday || 0}
           icon={MessageSquare}
           iconColor="text-green-400"
         />
         
         <StatCard
           title="Uptime"
-          value={`${stats.uptime}%`}
+          value={`${stats.uptime || 0}%`}
           icon={Activity}
           iconColor="text-purple-400"
         />
@@ -38,13 +38,13 @@ function Dashboard({ stats, recentActivity }) {
         
         <Card.Content>
           <div className="space-y-3">
-            {recentActivity.length > 0 ? (
-              recentActivity.map((activity) => (
-                <div key={activity.id} className="bg-gray-700 rounded-lg p-4">
+            {recentActivity && recentActivity.length > 0 ? (
+              recentActivity.map((activity, index) => (
+                <div key={activity.id ? `activity-${activity.id}` : `activity-index-${index}`} className="bg-gray-700 rounded-lg p-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-medium text-white">{activity.message}</p>
-                      <p className="text-gray-400 text-sm">{activity.timestamp}</p>
+                      <p className="font-medium text-white">{activity.message || 'Unknown activity'}</p>
+                      <p className="text-gray-400 text-sm">{activity.timestamp || 'Unknown time'}</p>
                     </div>
                     <div className="w-2 h-2 bg-green-500 rounded-full flex-shrink-0"></div>
                   </div>

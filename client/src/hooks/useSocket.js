@@ -51,7 +51,9 @@ export const useBotData = () => {
         messagesToday: data.messagesToday,
         uptime: data.uptime
       });
-      setRecentActivity(data.recentActivity || []);
+      if (data.recentActivity) {
+        setRecentActivity(data.recentActivity);
+      }
     });
 
     // Listen for real-time stats updates
@@ -63,9 +65,16 @@ export const useBotData = () => {
       }));
     });
 
-    // Listen for new activity
+    // Listen for new activity - prevent duplicates
     socketService.listenToServer('newActivity', (activity) => {
-      setRecentActivity(prev => [activity, ...prev.slice(0, 9)]);
+      setRecentActivity(prev => {
+        // Check if activity already exists
+        const exists = prev.some(item => item.id === activity.id);
+        if (exists) {
+          return prev; // Don't add duplicate
+        }
+        return [activity, ...prev.slice(0, 9)]; // Keep only 10 items
+      });
     });
   }, []);
 
