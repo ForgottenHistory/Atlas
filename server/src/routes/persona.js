@@ -21,7 +21,15 @@ router.get('/', async (req, res) => {
 // POST /api/persona
 router.post('/', async (req, res) => {
   try {
-    const { name, description } = req.body;
+    const { 
+      name, 
+      description, 
+      mes_example, 
+      creator_notes, 
+      tags, 
+      creator, 
+      character_version 
+    } = req.body;
     
     if (!name || !description) {
       return res.status(400).json({
@@ -32,7 +40,12 @@ router.post('/', async (req, res) => {
     
     const personaData = {
       name: name.trim(),
-      description: description.trim()
+      description: description.trim(),
+      mes_example: mes_example?.trim() || '',
+      creator_notes: creator_notes?.trim() || '',
+      tags: Array.isArray(tags) ? tags : [],
+      creator: creator?.trim() || '',
+      character_version: character_version?.trim() || ''
     };
     
     const success = await storage.updatePersona(personaData);
@@ -64,11 +77,24 @@ router.post('/', async (req, res) => {
 // PUT /api/persona
 router.put('/', async (req, res) => {
   try {
-    const { name, description } = req.body;
+    const { 
+      name, 
+      description, 
+      mes_example, 
+      creator_notes, 
+      tags, 
+      creator, 
+      character_version 
+    } = req.body;
     
     const updates = {};
     if (name !== undefined) updates.name = name.trim();
     if (description !== undefined) updates.description = description.trim();
+    if (mes_example !== undefined) updates.mes_example = mes_example.trim();
+    if (creator_notes !== undefined) updates.creator_notes = creator_notes.trim();
+    if (tags !== undefined) updates.tags = Array.isArray(tags) ? tags : [];
+    if (creator !== undefined) updates.creator = creator.trim();
+    if (character_version !== undefined) updates.character_version = character_version.trim();
     
     const success = await storage.updatePersona(updates);
     
