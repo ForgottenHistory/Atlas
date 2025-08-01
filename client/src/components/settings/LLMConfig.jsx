@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Brain, RotateCcw } from 'lucide-react';
 import { Input, Button, Card, Textarea } from '../shared';
+import ModelSelector from './ModelSelector';
 
 const LLMConfig = ({ onUpdateSettings, isSubmitting }) => {
   const [formData, setFormData] = useState({
+    model: '',
     systemPrompt: '',
     temperature: '0.6',
     top_p: '1',
@@ -24,6 +26,7 @@ const LLMConfig = ({ onUpdateSettings, isSubmitting }) => {
         if (result.success && result.data.llm) {
           const llmSettings = result.data.llm;
           setFormData({
+            model: llmSettings.model || '',
             systemPrompt: llmSettings.systemPrompt || '',
             temperature: llmSettings.temperature?.toString() || '0.6',
             top_p: llmSettings.top_p?.toString() || '1',
@@ -56,14 +59,18 @@ const LLMConfig = ({ onUpdateSettings, isSubmitting }) => {
     // Convert values to proper types and filter out empty values
     const llmSettings = {};
     
-    // Handle system prompt (string)
+    // Handle system prompt and model (strings)
     if (formData.systemPrompt.trim() !== '') {
       llmSettings.systemPrompt = formData.systemPrompt.trim();
     }
     
+    if (formData.model.trim() !== '') {
+      llmSettings.model = formData.model.trim();
+    }
+    
     // Handle numeric parameters
     Object.entries(formData).forEach(([key, value]) => {
-      if (key !== 'systemPrompt' && value.trim() !== '') {
+      if (key !== 'systemPrompt' && key !== 'model' && value.trim() !== '') {
         const numValue = parseFloat(value);
         if (!isNaN(numValue)) {
           llmSettings[key] = numValue;
@@ -76,6 +83,7 @@ const LLMConfig = ({ onUpdateSettings, isSubmitting }) => {
 
   const resetToDefaults = () => {
     setFormData({
+      model: '',
       systemPrompt: '',
       temperature: '0.6',
       top_p: '1',
@@ -129,6 +137,19 @@ const LLMConfig = ({ onUpdateSettings, isSubmitting }) => {
       
       <Card.Content>
         <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Model Selection */}
+          <div className="space-y-4">
+            <h4 className="text-lg font-medium text-white border-b border-gray-600 pb-2">
+              Model Selection
+            </h4>
+            
+            <ModelSelector
+              selectedModel={formData.model}
+              onModelSelect={(modelId) => setFormData(prev => ({ ...prev, model: modelId }))}
+              disabled={isSubmitting}
+            />
+          </div>
+
           {/* System Prompt Section */}
           <div className="space-y-4">
             <h4 className="text-lg font-medium text-white border-b border-gray-600 pb-2">

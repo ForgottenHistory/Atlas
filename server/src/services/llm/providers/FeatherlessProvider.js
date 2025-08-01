@@ -7,12 +7,13 @@ class FeatherlessProvider {
     this.client = this.createClient();
     this.defaultModel = 'moonshotai/Kimi-K2-Instruct';
     this.maxTokens = 16384;
+    this.availableModels = null;
     
     if (this.client) {
       logger.success('Featherless provider initialized', {
         source: 'llm',
         provider: this.name,
-        model: this.defaultModel,
+        defaultModel: this.defaultModel,
         maxTokens: this.maxTokens
       });
     } else {
@@ -40,16 +41,65 @@ class FeatherlessProvider {
     });
   }
 
-  async generateResponse(prompt, settings = {}) {
+  async fetchAvailableModels() {
     if (!this.client) {
       throw new Error('Featherless client not initialized - check API key');
     }
 
     try {
+      logger.debug('Fetching available models from Featherless API', {
+        source: 'llm',
+        provider: this.name
+      });
+
+      const response = await fetch('https://api.featherless.ai/v1/models', {
+        headers: {
+          'Authorization': `Bearer ${process.env.FEATHERLESS_API_KEY}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log(data);
+      if (data.data && Array.isArray(data.data)) {
+        this.availableModels = data.data;
+        
+        logger.info('Successfully fetched available models', {
+          source: 'llm',
+          provider: this.name,
+          modelCount: data.data.length
+        });
+        
+        return data.data;
+      } else {
+        throw new Error('Invalid response format from models API');
+      }
+    } catch (error) {
+      logger.error('Failed to fetch available models', {
+        source: 'llm',
+        provider: this.name,
+        error: error.message
+      });
+      throw error;
+    }
+  }
+
+  async generateResponse(prompt, settings = {}) {
+    if (!this.client) {
+      throw new Error('Featherless client not initialized - check API key');
+    }
+
+    // Determine which model to use
+    const modelToUse = settings.model || this.defaultModel;
+
+    try {
       logger.debug('Making Featherless API call', {
         source: 'llm',
         provider: this.name,
-        model: this.defaultModel,
+        model: modelToUse,
         promptLength: prompt.length,
         settings: {
           temperature: settings.temperature || 0.6,
@@ -60,7 +110,7 @@ class FeatherlessProvider {
 
       const startTime = Date.now();
       const response = await this.client.chat.completions.create({
-        model: this.defaultModel,
+        model: modelToUse,
         max_tokens: Math.min(settings.max_tokens || 512, this.maxTokens),
         temperature: settings.temperature || 0.6,
         top_p: settings.top_p || 1,
@@ -73,6 +123,7 @@ class FeatherlessProvider {
       logger.info('Featherless API call completed', {
         source: 'llm',
         provider: this.name,
+        model: modelToUse,
         apiTime: `${apiTime}ms`,
         usage: response.usage || 'not provided'
       });
@@ -82,6 +133,7 @@ class FeatherlessProvider {
       logger.error('Featherless API error', {
         source: 'llm',
         provider: this.name,
+        model: modelToUse,
         error: error.message,
         status: error.status,
         code: error.code
@@ -143,7 +195,7 @@ class FeatherlessProvider {
       displayName: 'Featherless AI',
       maxTokens: this.maxTokens,
       defaultModel: this.defaultModel,
-      supportedParams: ['temperature', 'top_p', 'max_tokens'],
+      supportedParams: ['model', 'temperature', 'top_p', 'max_tokens'],
       responseFormat: 'text_completion'
     };
   }
@@ -166,6 +218,12 @@ class FeatherlessProvider {
     if (settings.max_tokens !== undefined) {
       if (settings.max_tokens < 1 || settings.max_tokens > this.maxTokens) {
         errors.push(`Max tokens must be between 1 and ${this.maxTokens}`);
+      }
+    }
+
+    if (settings.model !== undefined) {
+      if (typeof settings.model !== 'string' || settings.model.trim().length === 0) {
+        errors.push('Model must be a non-empty string');
       }
     }
 
