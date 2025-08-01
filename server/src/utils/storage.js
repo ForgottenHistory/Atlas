@@ -40,7 +40,12 @@ class Storage {
     return {
       settings: {
         botToken: '',
-        commandPrefix: '!'
+        commandPrefix: '!',
+        llm: {
+          temperature: 0.6,
+          top_p: 1,
+          repetition_penalty: 1
+        }
       },
       persona: {
         name: '',
@@ -77,8 +82,19 @@ class Storage {
     return await this.save();
   }
 
+  async updateLLMSettings(llmSettings) {
+    if (!this.data) return false;
+    
+    this.data.settings.llm = { ...this.data.settings.llm, ...llmSettings };
+    return await this.save();
+  }
+
   getSettings() {
     return this.data?.settings || this.getDefaultData().settings;
+  }
+
+  getLLMSettings() {
+    return this.data?.settings?.llm || this.getDefaultData().settings.llm;
   }
 
   // Persona methods

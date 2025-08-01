@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Brain, RotateCcw } from 'lucide-react';
 import { Input, Button, Card } from '../shared';
 
@@ -12,6 +12,33 @@ const LLMConfig = ({ onUpdateSettings, isSubmitting }) => {
     repetition_penalty: '1',
     min_p: ''
   });
+
+  useEffect(() => {
+    // Load existing LLM settings
+    const loadLLMSettings = async () => {
+      try {
+        const response = await fetch('http://localhost:3001/api/settings');
+        const result = await response.json();
+        
+        if (result.success && result.data.llm) {
+          const llmSettings = result.data.llm;
+          setFormData({
+            temperature: llmSettings.temperature?.toString() || '0.6',
+            top_p: llmSettings.top_p?.toString() || '1',
+            top_k: llmSettings.top_k?.toString() || '',
+            frequency_penalty: llmSettings.frequency_penalty?.toString() || '',
+            presence_penalty: llmSettings.presence_penalty?.toString() || '',
+            repetition_penalty: llmSettings.repetition_penalty?.toString() || '1',
+            min_p: llmSettings.min_p?.toString() || ''
+          });
+        }
+      } catch (error) {
+        console.error('Failed to load LLM settings:', error);
+      }
+    };
+
+    loadLLMSettings();
+  }, []);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
