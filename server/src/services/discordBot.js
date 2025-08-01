@@ -226,6 +226,123 @@ class DiscordBot {
     });
   }
 
+  // Get servers (guilds) that the bot is in
+  getServers() {
+    if (!this.client || !this.isConnected) {
+      return [];
+    }
+
+    return this.client.guilds.cache.map(guild => ({
+      id: guild.id,
+      name: guild.name,
+      memberCount: guild.memberCount,
+      iconURL: guild.iconURL(),
+      owner: guild.ownerId === this.client.user.id
+    }));
+  }
+
+  // Get channels for a specific server
+  getChannels(serverId) {
+    if (!this.client || !this.isConnected) {
+      return [];
+    }
+
+    const guild = this.client.guilds.cache.get(serverId);
+    if (!guild) {
+      return [];
+    }
+
+    return guild.channels.cache
+      .filter(channel => channel.type !== 4) // Exclude category channels for now
+      .map(channel => ({
+        id: channel.id,
+        name: channel.name,
+        type: this.getChannelTypeString(channel.type),
+        topic: channel.topic || null,
+        parentId: channel.parentId,
+        position: channel.position,
+        memberCount: channel.type === 2 ? channel.members?.size : null, // Voice channels
+        nsfw: channel.nsfw || false
+      }))
+      .sort((a, b) => a.position - b.position);
+  }
+
+  // Helper to convert Discord channel types to readable strings
+  getChannelTypeString(type) {
+    const types = {
+      0: 'GUILD_TEXT',
+      1: 'DM',
+      2: 'GUILD_VOICE',
+      3: 'GROUP_DM',
+      4: 'GUILD_CATEGORY',
+      5: 'GUILD_ANNOUNCEMENT',
+      10: 'ANNOUNCEMENT_THREAD',
+      11: 'PUBLIC_THREAD',
+      12: 'PRIVATE_THREAD',
+      13: 'GUILD_STAGE_VOICE',
+      14: 'GUILD_DIRECTORY',
+      15: 'GUILD_FORUM'
+    };
+    return types[type] || 'UNKNOWN';
+  }
+
+  // Update active channels configuration
+  async updateActiveChannels(serverId, channelIds) {
+    try {
+      await storage.init();
+      
+      // Get current config or create new one
+      let channelsConfig = storage.get('activeChannels') || {};
+      
+      // Update server's active channels
+      channelsConfig[serverId] = {
+        channelIds: channelIds,
+        updatedAt: new Date().toISOString()
+      };
+      
+      // Save to storage
+      const success = await storage.set('activeChannels', channelsConfig);
+      
+      if (success) {
+        // Add activity log
+        const guild = this.client?.guilds.cache.get(serverId);
+        const serverName = guild ? guild.name : 'Unknown Server';
+        await storage.addActivity(`Active channels updated for ${serverName} (${channelIds.length} channels)`);
+        
+        // Emit update event
+        this.emit('activeChannelsUpdated', {
+          serverId,
+          channelIds,
+          serverName
+        });
+      }
+      
+      return success;
+    } catch (error) {
+      console.error('Failed to update active channels:', error);
+      return false;
+    }
+  }
+
+  // Get active channels for a server
+  getActiveChannels(serverId) {
+    const channelsConfig = storage.get('activeChannels') || {};
+    return channelsConfig[serverId]?.channelIds || [];
+  }
+
+  // Check if a channel is active
+  isChannelActive(channelId) {
+    const channelsConfig = storage.get('activeChannels') || {};
+    
+    for (const serverConfig of Object.values(channelsConfig)) {
+      if (serverConfig.channelIds && serverConfig.channelIds.includes(channelId)) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
   // Getters
   getStatus() {
     return {
