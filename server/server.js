@@ -19,17 +19,26 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// Import routes and storage
+// Import routes, storage, and Discord bot
 const { router: botRouter, getBotData, getRuntimeData, updateRuntimeData } = require('./src/routes/bot');
 const personaRouter = require('./src/routes/persona');
 const settingsRouter = require('./src/routes/settings');
 const storage = require('./src/utils/storage');
+const discordBot = require('./src/services/discordBot');
 
-// Initialize storage once at startup
+// Initialize storage and Discord bot
 const initializeApp = async () => {
   try {
     await storage.init();
-    console.log('Application initialized successfully');
+    console.log('Storage initialized successfully');
+    
+    // Initialize Discord bot
+    const botStarted = await discordBot.initialize();
+    if (botStarted) {
+      console.log('Discord bot initialized successfully');
+    } else {
+      console.log('Discord bot initialization skipped (no token)');
+    }
   } catch (error) {
     console.error('Failed to initialize application:', error);
   }
@@ -45,8 +54,50 @@ app.get('/api/health', (req, res) => {
   res.json({
     success: true,
     message: 'Atlas Bot API is running',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    discordStatus: discordBot.getStatus()
   });
+});
+
+// Discord bot event handlers for socket.io
+discordBot.on('botConnected', (data) => {
+  console.log('Discord bot connected, notifying clients');
+  updateRuntimeData({ isConnected: true });
+  io.emit('botStatus', { 
+    ...getRuntimeData(), 
+    discordUser: data.username,
+    guilds: data.guilds 
+  });
+});
+
+discordBot.on('botDisconnected', () => {
+  console.log('Discord bot disconnected, notifying clients');
+  updateRuntimeData({ isConnected: false });
+  io.emit('botStatus', getRuntimeData());
+});
+
+discordBot.on('botError', (data) => {
+  console.log('Discord bot error:', data.error);
+  io.emit('botError', data);
+});
+
+discordBot.on('messageReceived', async (data) => {
+  // Update message stats
+  const runtimeData = getRuntimeData();
+  updateRuntimeData({ 
+    messagesToday: runtimeData.messagesToday + 1 
+  });
+  
+  // Notify clients
+  io.emit('statsUpdate', {
+    messagesToday: runtimeData.messagesToday + 1,
+    activeUsers: runtimeData.activeUsers
+  });
+  
+  // Add activity log
+  await storage.addActivity(`Message from ${data.author} in ${data.guild}`);
+  const activity = storage.getRecentActivity();
+  io.emit('newActivity', activity[0]);
 });
 
 // Socket.IO connection handling
@@ -54,16 +105,19 @@ io.on('connection', async (socket) => {
   console.log('Client connected:', socket.id);
   
   try {
-    // Get current data (storage already initialized)
+    // Get current data
     const botData = await getBotData();
+    const discordStatus = discordBot.getStatus();
     
-    // Send initial bot status
+    // Send initial bot status including Discord status
     socket.emit('botStatus', {
-      isConnected: botData.isConnected,
+      isConnected: discordStatus.isConnected,
       activeUsers: botData.activeUsers,
       messagesToday: botData.messagesToday,
       uptime: botData.uptime,
-      recentActivity: botData.recentActivity
+      recentActivity: botData.recentActivity,
+      discordUser: discordStatus.username,
+      guilds: discordStatus.guilds
     });
   } catch (error) {
     console.error('Error initializing socket connection:', error);
@@ -72,30 +126,48 @@ io.on('connection', async (socket) => {
   // Handle bot connection toggle
   socket.on('toggleBotConnection', async () => {
     try {
-      const runtimeData = getRuntimeData();
-      runtimeData.isConnected = !runtimeData.isConnected;
-      updateRuntimeData({ isConnected: runtimeData.isConnected });
+      const discordStatus = discordBot.getStatus();
       
-      console.log('Bot connection toggled:', runtimeData.isConnected);
+      if (discordStatus.isConnected) {
+        // Disconnect bot
+        await discordBot.disconnect();
+        updateRuntimeData({ isConnected: false });
+        await storage.addActivity('Bot manually disconnected');
+      } else {
+        // Connect bot
+        const settings = storage.getSettings();
+        if (!settings.botToken) {
+          socket.emit('botError', { error: 'No bot token configured' });
+          return;
+        }
+        
+        const success = await discordBot.initialize();
+        if (success) {
+          updateRuntimeData({ isConnected: true });
+          await storage.addActivity('Bot manually connected');
+        } else {
+          socket.emit('botError', { error: 'Failed to connect bot' });
+          return;
+        }
+      }
       
-      // Add activity log
-      const activity = await storage.addActivity(
-        `Bot ${runtimeData.isConnected ? 'connected' : 'disconnected'}`
-      );
-      
-      // Broadcast to all clients
+      // Broadcast updated status
       const botData = await getBotData();
+      const newDiscordStatus = discordBot.getStatus();
+      
       io.emit('botStatus', {
-        isConnected: botData.isConnected,
+        isConnected: newDiscordStatus.isConnected,
         activeUsers: botData.activeUsers,
         messagesToday: botData.messagesToday,
         uptime: botData.uptime,
-        recentActivity: botData.recentActivity
+        recentActivity: botData.recentActivity,
+        discordUser: newDiscordStatus.username,
+        guilds: newDiscordStatus.guilds
       });
       
-      io.emit('newActivity', activity);
     } catch (error) {
       console.error('Error toggling bot connection:', error);
+      socket.emit('botError', { error: 'Failed to toggle bot connection' });
     }
   });
   
@@ -129,17 +201,19 @@ io.on('connection', async (socket) => {
     }
   });
   
-  // Handle settings updates
+  // Handle settings updates (now with Discord bot restart)
   socket.on('updateSettings', async (settingsData) => {
     try {
       console.log('Settings updated via socket:', settingsData);
       
       let updated = [];
       const updates = {};
+      let needsBotRestart = false;
       
       if (settingsData.botToken !== undefined) {
         updates.botToken = settingsData.botToken.trim();
         updated.push('bot token');
+        needsBotRestart = true;
       }
       
       if (settingsData.commandPrefix !== undefined) {
@@ -155,6 +229,17 @@ io.on('connection', async (socket) => {
         if (success) {
           const activity = await storage.addActivity(`Settings updated: ${updated.join(', ')}`);
           
+          // Restart Discord bot if token was updated
+          if (needsBotRestart) {
+            try {
+              await discordBot.updateToken(updates.botToken);
+              await storage.addActivity('Bot restarted with new token');
+            } catch (error) {
+              console.error('Failed to restart bot with new token:', error);
+              await storage.addActivity('Bot restart failed with new token');
+            }
+          }
+          
           socket.emit('settingsUpdated', { success: true });
           io.emit('newActivity', activity);
         } else {
@@ -169,12 +254,12 @@ io.on('connection', async (socket) => {
     }
   });
   
-  // Simulate real-time stats updates
+  // Simulate real-time stats updates (only when bot is connected)
   const statsInterval = setInterval(() => {
-    const runtimeData = getRuntimeData();
-    if (runtimeData.isConnected) {
+    const discordStatus = discordBot.getStatus();
+    if (discordStatus.isConnected) {
+      const runtimeData = getRuntimeData();
       const updates = {
-        messagesToday: runtimeData.messagesToday + Math.floor(Math.random() * 5),
         activeUsers: Math.max(0, runtimeData.activeUsers + Math.floor(Math.random() * 3) - 1)
       };
       
@@ -182,7 +267,7 @@ io.on('connection', async (socket) => {
       
       io.emit('statsUpdate', {
         activeUsers: updates.activeUsers,
-        messagesToday: updates.messagesToday
+        messagesToday: runtimeData.messagesToday
       });
     }
   }, 5000);
@@ -190,6 +275,16 @@ io.on('connection', async (socket) => {
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
     clearInterval(statsInterval);
+  });
+});
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('Shutting down gracefully...');
+  await discordBot.disconnect();
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
   });
 });
 
