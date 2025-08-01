@@ -24,7 +24,7 @@ const { router: botRouter, getBotData, getRuntimeData, updateRuntimeData } = req
 const personaRouter = require('./src/routes/persona');
 const settingsRouter = require('./src/routes/settings');
 const storage = require('./src/utils/storage');
-const discordBot = require('./src/services/discordBot');
+const discordService = require('./src/services/discord');
 
 // Initialize storage and Discord bot
 const initializeApp = async () => {
@@ -33,7 +33,7 @@ const initializeApp = async () => {
     console.log('Storage initialized successfully');
 
     // Initialize Discord bot
-    const botStarted = await discordBot.initialize();
+    const botStarted = await discordService.initialize();
     if (botStarted) {
       console.log('Discord bot initialized successfully');
     } else {
@@ -55,12 +55,12 @@ app.get('/api/health', (req, res) => {
     success: true,
     message: 'Atlas Bot API is running',
     timestamp: new Date().toISOString(),
-    discordStatus: discordBot.getStatus()
+    discordStatus: discordService.getStatus()
   });
 });
 
 // Discord bot event handlers for socket.io
-discordBot.on('botConnected', (data) => {
+discordService.on('botConnected', (data) => {
   console.log('Discord bot connected, notifying clients');
   updateRuntimeData({ isConnected: true });
   io.emit('botStatus', {
@@ -70,18 +70,18 @@ discordBot.on('botConnected', (data) => {
   });
 });
 
-discordBot.on('botDisconnected', () => {
+discordService.on('botDisconnected', () => {
   console.log('Discord bot disconnected, notifying clients');
   updateRuntimeData({ isConnected: false });
   io.emit('botStatus', getRuntimeData());
 });
 
-discordBot.on('botError', (data) => {
+discordService.on('botError', (data) => {
   console.log('Discord bot error:', data.error);
   io.emit('botError', data);
 });
 
-discordBot.on('messageReceived', async (data) => {
+discordService.on('messageReceived', async (data) => {
   // Update message stats
   const runtimeData = getRuntimeData();
   updateRuntimeData({
@@ -107,7 +107,7 @@ io.on('connection', async (socket) => {
   try {
     // Get current data
     const botData = await getBotData();
-    const discordStatus = discordBot.getStatus();
+    const discordStatus = discordService.getStatus();
 
     // Send initial bot status including Discord status
     socket.emit('botStatus', {
@@ -126,11 +126,11 @@ io.on('connection', async (socket) => {
   // Handle bot connection toggle
   socket.on('toggleBotConnection', async () => {
     try {
-      const discordStatus = discordBot.getStatus();
+      const discordStatus = discordService.getStatus();
 
       if (discordStatus.isConnected) {
         // Disconnect bot
-        await discordBot.disconnect();
+        await discordService.disconnect();
         updateRuntimeData({ isConnected: false });
         await storage.addActivity('Bot manually disconnected');
       } else {
@@ -141,7 +141,7 @@ io.on('connection', async (socket) => {
           return;
         }
 
-        const success = await discordBot.initialize();
+        const success = await discordService.initialize();
         if (success) {
           updateRuntimeData({ isConnected: true });
           await storage.addActivity('Bot manually connected');
@@ -153,7 +153,7 @@ io.on('connection', async (socket) => {
 
       // Broadcast updated status
       const botData = await getBotData();
-      const newDiscordStatus = discordBot.getStatus();
+      const newDiscordStatus = discordService.getStatus();
 
       io.emit('botStatus', {
         isConnected: newDiscordStatus.isConnected,
@@ -232,7 +232,7 @@ io.on('connection', async (socket) => {
           // Restart Discord bot if token was updated
           if (needsBotRestart) {
             try {
-              await discordBot.updateToken(updates.botToken);
+              await discordService.updateToken(updates.botToken);
               await storage.addActivity('Bot restarted with new token');
             } catch (error) {
               console.error('Failed to restart bot with new token:', error);
@@ -257,7 +257,7 @@ io.on('connection', async (socket) => {
   // Handle getting servers
   socket.on('getServers', () => {
     try {
-      const servers = discordBot.getServers();
+      const servers = discordService.getServers();
       socket.emit('serversData', { servers });
     } catch (error) {
       console.error('Error getting servers:', error);
@@ -268,7 +268,7 @@ io.on('connection', async (socket) => {
   socket.on('getBotStatus', async () => {
     try {
       const botData = await getBotData();
-      const discordStatus = discordBot.getStatus();
+      const discordStatus = discordService.getStatus();
 
       socket.emit('botStatus', {
         isConnected: discordStatus.isConnected,
@@ -293,8 +293,8 @@ io.on('connection', async (socket) => {
         return;
       }
 
-      const channels = discordBot.getChannels(serverId);
-      const activeChannels = discordBot.getActiveChannels(serverId);
+      const channels = discordService.getChannels(serverId);
+      const activeChannels = discordService.getActiveChannels(serverId);
 
       socket.emit('channelsData', {
         channels,
@@ -320,7 +320,7 @@ io.on('connection', async (socket) => {
         return;
       }
 
-      const success = await discordBot.updateActiveChannels(serverId, channelIds);
+      const success = await discordService.updateActiveChannels(serverId, channelIds);
 
       socket.emit('activeChannelsUpdated', {
         success,
@@ -339,7 +339,7 @@ io.on('connection', async (socket) => {
 
   // Simulate real-time stats updates (only when bot is connected)
   const statsInterval = setInterval(() => {
-    const discordStatus = discordBot.getStatus();
+    const discordStatus = discordService.getStatus();
     if (discordStatus.isConnected) {
       const runtimeData = getRuntimeData();
       const updates = {
@@ -364,7 +364,7 @@ io.on('connection', async (socket) => {
 // Graceful shutdown
 process.on('SIGINT', async () => {
   console.log('Shutting down gracefully...');
-  await discordBot.disconnect();
+  await discordService.disconnect();
   server.close(() => {
     console.log('Server closed');
     process.exit(0);
