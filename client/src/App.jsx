@@ -8,6 +8,7 @@ import { useSocket, useBotData } from './hooks/useSocket';
 import Dashboard from './components/Dashboard';
 import Persona from './components/Persona';
 import Settings from './components/Settings';
+import Sidebar from './components/Sidebar';
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -98,29 +99,11 @@ function App() {
       <div className="max-w-full mx-auto px-6 py-8">
         <div className="flex flex-col xl:flex-row gap-8">
           {/* Sidebar Navigation */}
-          <div className="xl:w-64 flex-shrink-0">
-            <div className="bg-gray-800 rounded-lg p-4">
-              <nav className="space-y-2">
-                {tabs.map((tab) => {
-                  const Icon = tab.icon;
-                  return (
-                    <button
-                      key={tab.id}
-                      onClick={() => setActiveTab(tab.id)}
-                      className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-left transition-colors ${
-                        activeTab === tab.id
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                      }`}
-                    >
-                      <Icon className="h-5 w-5" />
-                      <span>{tab.label}</span>
-                    </button>
-                  );
-                })}
-              </nav>
-            </div>
-          </div>
+          <Sidebar 
+            tabs={tabs}
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+          />
 
           {/* Main Content */}
           <div className="flex-1 min-w-0">
