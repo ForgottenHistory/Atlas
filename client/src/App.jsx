@@ -1,16 +1,47 @@
 import { useState } from 'react';
-import { Bot, Settings, MessageSquare, Users, Activity, Power } from 'lucide-react';
+import { Bot, Settings as SettingsIcon, Activity, Power } from 'lucide-react';
+
+// Import hooks
+import { useSocket, useBotData } from './hooks/useSocket';
+
+// Import components
+import Dashboard from './components/Dashboard';
+import Persona from './components/Persona';
+import Settings from './components/Settings';
 
 function App() {
-  const [isConnected, setIsConnected] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
+  
+  // Socket connection management
+  const { isConnected: socketConnected, connectionError } = useSocket();
+  
+  // Bot data management
+  const { 
+    botStatus, 
+    recentActivity, 
+    toggleBotConnection, 
+    updatePersona, 
+    updateSettings 
+  } = useBotData();
 
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: Activity },
     { id: 'persona', label: 'Persona', icon: Bot },
-    { id: 'users', label: 'Users', icon: Users },
-    { id: 'settings', label: 'Settings', icon: Settings },
+    { id: 'settings', label: 'Settings', icon: SettingsIcon },
   ];
+
+  const renderActiveTab = () => {
+    switch (activeTab) {
+      case 'dashboard':
+        return <Dashboard stats={botStatus} recentActivity={recentActivity} />;
+      case 'persona':
+        return <Persona onUpdatePersona={updatePersona} />;
+      case 'settings':
+        return <Settings onUpdateSettings={updateSettings} />;
+      default:
+        return <Dashboard stats={botStatus} recentActivity={recentActivity} />;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
@@ -24,21 +55,40 @@ function App() {
             </div>
             
             <div className="flex items-center space-x-4">
+              {/* Connection Status */}
               <div className="flex items-center space-x-2">
-                <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                <span className="text-sm">{isConnected ? 'Connected' : 'Disconnected'}</span>
+                <div className={`w-3 h-3 rounded-full ${
+                  socketConnected && botStatus.isConnected ? 'bg-green-500' : 'bg-red-500'
+                }`}></div>
+                <span className="text-sm">
+                  {socketConnected 
+                    ? (botStatus.isConnected ? 'Connected' : 'Disconnected')
+                    : 'Socket Offline'
+                  }
+                </span>
               </div>
               
+              {/* Connection Error */}
+              {connectionError && (
+                <div className="text-xs text-red-400 max-w-32 truncate" title={connectionError}>
+                  Error: {connectionError}
+                </div>
+              )}
+              
+              {/* Toggle Button */}
               <button
-                onClick={() => setIsConnected(!isConnected)}
+                onClick={toggleBotConnection}
+                disabled={!socketConnected}
                 className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-                  isConnected 
-                    ? 'bg-red-600 hover:bg-red-700 text-white' 
-                    : 'bg-green-600 hover:bg-green-700 text-white'
+                  !socketConnected
+                    ? 'bg-gray-600 cursor-not-allowed'
+                    : botStatus.isConnected 
+                      ? 'bg-red-600 hover:bg-red-700 text-white' 
+                      : 'bg-green-600 hover:bg-green-700 text-white'
                 }`}
               >
                 <Power className="h-4 w-4" />
-                <span>{isConnected ? 'Disconnect' : 'Connect'}</span>
+                <span>{botStatus.isConnected ? 'Disconnect' : 'Connect'}</span>
               </button>
             </div>
           </div>
@@ -51,151 +101,31 @@ function App() {
           <div className="xl:w-64 flex-shrink-0">
             <div className="bg-gray-800 rounded-lg p-4">
               <nav className="space-y-2">
-              {tabs.map((tab) => {
-                const Icon = tab.icon;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-left transition-colors ${
-                      activeTab === tab.id
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                    }`}
-                  >
-                    <Icon className="h-5 w-5" />
-                    <span>{tab.label}</span>
-                  </button>
-                );
-              })}
-                          </nav>
+                {tabs.map((tab) => {
+                  const Icon = tab.icon;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveTab(tab.id)}
+                      className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-left transition-colors ${
+                        activeTab === tab.id
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                      }`}
+                    >
+                      <Icon className="h-5 w-5" />
+                      <span>{tab.label}</span>
+                    </button>
+                  );
+                })}
+              </nav>
             </div>
           </div>
 
           {/* Main Content */}
           <div className="flex-1 min-w-0">
             <div className="bg-gray-800 rounded-lg p-6">
-              {activeTab === 'dashboard' && (
-                <div>
-                  <h2 className="text-2xl font-bold mb-6">Dashboard</h2>
-                  
-                  {/* Stats Cards */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
-                    <div className="bg-gray-700 rounded-lg p-8">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-gray-400 text-sm">Active Users</p>
-                          <p className="text-2xl font-bold">1,234</p>
-                        </div>
-                        <Users className="h-8 w-8 text-blue-400" />
-                      </div>
-                    </div>
-                    
-                    <div className="bg-gray-700 rounded-lg p-8">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-gray-400 text-sm">Messages Today</p>
-                          <p className="text-2xl font-bold">5,678</p>
-                        </div>
-                        <MessageSquare className="h-8 w-8 text-green-400" />
-                      </div>
-                    </div>
-                    
-                    <div className="bg-gray-700 rounded-lg p-8">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-gray-400 text-sm">Uptime</p>
-                          <p className="text-2xl font-bold">99.9%</p>
-                        </div>
-                        <Activity className="h-8 w-8 text-purple-400" />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Recent Activity */}
-                  <div>
-                    <h3 className="text-lg font-semibold mb-4">Recent Activity</h3>
-                    <div className="space-y-3">
-                      {[1, 2, 3].map((i) => (
-                        <div key={i} className="bg-gray-700 rounded-lg p-4">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="font-medium">User interaction in #general</p>
-                              <p className="text-gray-400 text-sm">2 minutes ago</p>
-                            </div>
-                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'persona' && (
-                <div>
-                  <h2 className="text-2xl font-bold mb-6">Bot Persona</h2>
-                  <div className="space-y-6">
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Character Name</label>
-                      <input
-                        type="text"
-                        placeholder="Enter character name..."
-                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
-                    </div>
-                    
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Personality Description</label>
-                      <textarea
-                        rows={4}
-                        placeholder="Describe the bot's personality..."
-                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
-                    </div>
-                    
-                    <button className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg font-medium transition-colors">
-                      Save Persona
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'users' && (
-                <div>
-                  <h2 className="text-2xl font-bold mb-6">User Management</h2>
-                  <p className="text-gray-400">User management features coming soon...</p>
-                </div>
-              )}
-
-              {activeTab === 'settings' && (
-                <div>
-                  <h2 className="text-2xl font-bold mb-6">Settings</h2>
-                  <div className="space-y-6">
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Bot Token</label>
-                      <input
-                        type="password"
-                        placeholder="Enter bot token..."
-                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
-                    </div>
-                    
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Command Prefix</label>
-                      <input
-                        type="text"
-                        placeholder="!"
-                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
-                    </div>
-                    
-                    <button className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg font-medium transition-colors">
-                      Save Settings
-                    </button>
-                  </div>
-                </div>
-              )}
+              {renderActiveTab()}
             </div>
           </div>
         </div>
