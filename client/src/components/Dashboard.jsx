@@ -1,6 +1,7 @@
 import { MessageSquare, Users, Activity } from 'lucide-react';
 import { StatCard, Card } from './shared';
 import LogViewer from './dashboard/LogViewer';
+import QueueMonitor from './dashboard/QueueMonitor';
 
 function Dashboard({ stats, recentActivity, socketService }) {
   return (
@@ -31,8 +32,8 @@ function Dashboard({ stats, recentActivity, socketService }) {
         />
       </div>
 
-      {/* Main Content Grid - Equal Heights */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 flex-1 min-h-0">
+      {/* Main Content Grid - Three columns on large screens */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 flex-1 min-h-0">
         {/* Recent Activity */}
         <Card className="h-full flex flex-col">
           <Card.Header className="flex-shrink-0">
@@ -65,6 +66,9 @@ function Dashboard({ stats, recentActivity, socketService }) {
             </div>
           </Card.Content>
         </Card>
+
+        {/* Queue Monitor */}
+        <QueueMonitor socketService={socketService} />
 
         {/* System Logs */}
         <LogViewer socketService={socketService} />
