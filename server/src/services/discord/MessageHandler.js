@@ -2,7 +2,7 @@ const storage = require('../../utils/storage');
 const logger = require('../logger/Logger');
 const ConversationManager = require('./ConversationManager');
 const CommandHandler = require('./CommandHandler');
-const ResponseGenerator = require('./ResponseGenerator');
+const ResponseGenerator = require('./response/ResponseGenerator');
 
 class MessageHandler {
   constructor(discordClient, channelManager) {
