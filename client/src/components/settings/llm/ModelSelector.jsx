@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, ChevronLeft, ChevronRight, Bot, ChevronDown } from 'lucide-react';
-import { Input, Button, Card, LoadingSpinner } from '../shared';
+import { Input, Button, Card, LoadingSpinner } from '../../shared';
 
 const ModelSelector = ({ 
   selectedModel, 
