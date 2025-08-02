@@ -1,7 +1,7 @@
 const storage = require('../../utils/storage');
 const logger = require('../logger/Logger');
 const ConversationManager = require('./ConversationManager');
-const CommandHandler = require('./CommandHandler');
+const CommandHandler = require('./commands/CommandHandler');
 const ResponseGenerator = require('./response/ResponseGenerator');
 
 class MessageHandler {

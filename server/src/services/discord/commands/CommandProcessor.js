@@ -1,78 +1,12 @@
-const storage = require('../../utils/storage');
-const logger = require('../logger/Logger');
-const LLMService = require('../llm');
+const storage = require('../../../utils/storage');
+const logger = require('../../logger/Logger');
+const LLMService = require('../../llm');
 
-class CommandHandler {
+class CommandProcessor {
   constructor(discordClient, conversationManager) {
     this.discordClient = discordClient;
     this.conversationManager = conversationManager;
     this.llmService = new LLMService();
-    
-    // Define available commands
-    this.commands = {
-      ping: {
-        description: 'Check bot response time',
-        handler: this.handlePingCommand.bind(this)
-      },
-      help: {
-        description: 'Show available commands',
-        handler: this.handleHelpCommand.bind(this)
-      },
-      info: {
-        description: 'Show bot information',
-        handler: this.handleInfoCommand.bind(this)
-      },
-      clear: {
-        description: 'Clear conversation history',
-        handler: this.handleClearCommand.bind(this)
-      },
-      memory: {
-        description: 'Show memory usage stats',
-        handler: this.handleMemoryCommand.bind(this)
-      }
-    };
-    
-    logger.info('CommandHandler initialized', { 
-      source: 'discord',
-      availableCommands: Object.keys(this.commands)
-    });
-  }
-
-  async handleCommand(message, prefix) {
-    const args = message.content.slice(prefix.length).trim().split(/ +/);
-    const commandName = args.shift().toLowerCase();
-
-    logger.info('Command executed', {
-      source: 'discord',
-      command: commandName,
-      author: message.author.username,
-      channel: message.channel.name,
-      args: args
-    });
-
-    try {
-      const command = this.commands[commandName];
-      
-      if (command) {
-        await command.handler(message, args, prefix);
-      } else {
-        await this.handleUnknownCommand(message, commandName);
-      }
-
-      // Log activity
-      await storage.addActivity(`Command executed: ${prefix}${commandName} by ${message.author.username} in #${message.channel.name}`);
-      
-    } catch (error) {
-      logger.error('Error executing command', {
-        source: 'discord',
-        command: commandName,
-        error: error.message,
-        author: message.author.username,
-        channel: message.channel.name
-      });
-      
-      await message.reply('Sorry, there was an error executing that command.').catch(() => {});
-    }
   }
 
   async handlePingCommand(message) {
@@ -88,18 +22,32 @@ class CommandHandler {
   }
 
   async handleHelpCommand(message, args, prefix) {
+    // Get command registry from parent (we'll need to pass it in)
+    const storage = require('../../../utils/storage');
+    const settings = storage.getSettings();
+    const commandPrefix = prefix || settings.commandPrefix || '!';
+
+    // For now, hardcode the default commands
+    const defaultCommands = {
+      ping: 'Check bot response time',
+      help: 'Show available commands',
+      info: 'Show bot information',
+      clear: 'Clear conversation history',
+      memory: 'Show memory usage stats'
+    };
+
     const helpEmbed = {
       color: 0x0099FF,
       title: '🤖 Bot Commands',
       description: 'Available commands for this bot:',
-      fields: Object.entries(this.commands).map(([name, cmd]) => ({
-        name: `${prefix}${name}`,
-        value: cmd.description,
+      fields: Object.entries(defaultCommands).map(([name, description]) => ({
+        name: `${commandPrefix}${name}`,
+        value: description,
         inline: true
       })),
       timestamp: new Date().toISOString(),
       footer: {
-        text: `Use ${prefix}<command> to execute`
+        text: `Use ${commandPrefix}<command> to execute`
       }
     };
     
@@ -222,37 +170,22 @@ class CommandHandler {
     return `${seconds}s`;
   }
 
-  // Method to add new commands dynamically
-  addCommand(name, description, handler) {
-    this.commands[name] = {
-      description,
-      handler: handler.bind(this)
-    };
-    
-    logger.info('Command added', {
-      source: 'discord',
-      command: name,
-      description
-    });
-  }
-
-  // Method to remove commands
-  removeCommand(name) {
-    if (this.commands[name]) {
-      delete this.commands[name];
-      logger.info('Command removed', {
-        source: 'discord',
-        command: name
-      });
-      return true;
+  // Method to create custom command responses
+  async createCustomResponse(message, responseText, embedOptions = null) {
+    if (embedOptions) {
+      const embed = {
+        color: embedOptions.color || 0x0099FF,
+        title: embedOptions.title || '',
+        description: responseText,
+        timestamp: new Date().toISOString(),
+        ...embedOptions
+      };
+      
+      await message.reply({ embeds: [embed] });
+    } else {
+      await message.reply(responseText);
     }
-    return false;
-  }
-
-  // Get list of available commands
-  getAvailableCommands() {
-    return Object.keys(this.commands);
   }
 }
 
-module.exports = CommandHandler;
+module.exports = CommandProcessor;
