@@ -3,6 +3,8 @@ const logger = require('../logger/Logger');
 const ConversationManager = require('./ConversationManager');
 const CommandHandler = require('./commands/CommandHandler');
 const ResponseGenerator = require('./response/ResponseGenerator');
+const MessageFilter = require('./MessageFilter');
+const MessageBatcher = require('./MessageBatcher');
 
 class MessageHandler {
   constructor(discordClient, channelManager) {
@@ -10,22 +12,18 @@ class MessageHandler {
     this.channelManager = channelManager;
     this.eventHandlers = new Map();
     
-    // Initialize components
+    // Initialize specialized services
     this.conversationManager = new ConversationManager();
     this.commandHandler = new CommandHandler(discordClient, this.conversationManager);
     this.responseGenerator = new ResponseGenerator(this.conversationManager);
-    
-    // NEW: Message batching system
-    this.messageBatches = new Map(); // channelId -> { userId -> batchData }
-    this.batchTimeout = 3000; // 3 seconds to wait for more messages
+    this.messageFilter = new MessageFilter();
+    this.messageBatcher = new MessageBatcher(3000); // 3 second timeout
     
     this.setupMessageListener();
     
-    logger.info('MessageHandler initialized with smart message batching', { 
+    logger.info('MessageHandler initialized as thin intermediary', { 
       source: 'discord',
-      batchTimeout: this.batchTimeout,
-      components: ['ConversationManager', 'CommandHandler', 'ResponseGenerator'],
-      singleton: true
+      services: ['ConversationManager', 'CommandHandler', 'ResponseGenerator', 'MessageFilter', 'MessageBatcher']
     });
   }
 
@@ -50,36 +48,39 @@ class MessageHandler {
 
   async handleMessage(message) {
     try {
-      // Skip bot messages
-      if (message.author.bot) return;
-      
-      // Check if this channel is active
-      if (!this.channelManager.isChannelActive(message.channel.id)) {
-        logger.debug('Message in inactive channel ignored', {
-          source: 'discord',
-          channel: message.channel.name,
-          author: message.author.username
-        });
-        return;
+      // Delegate to filter service for basic validation
+      const shouldProcess = this.messageFilter.shouldProcessMessage(message, this.channelManager);
+      if (!shouldProcess.shouldProcess) {
+        return; // Skip processing based on filter decision
       }
       
+      // Check if it's a command
       const settings = storage.getSettings();
       const prefix = settings.commandPrefix || '!';
-
-      // Handle commands immediately (don't batch)
+      
       if (message.content.startsWith(prefix)) {
+        // Delegate to command handler
         await this.commandHandler.handleCommand(message, prefix);
         return;
       }
 
-      // Store message in conversation history
-      this.conversationManager.addMessage(message);
+      // Delegate to filter service for content filtering
+      const filterResult = this.messageFilter.filterMessage(message);
+      if (!filterResult.shouldProcess) {
+        return; // Skip based on content filter (emotes, etc.)
+      }
 
-      // NEW: Smart message batching
-      await this.handleMessageBatching(message);
+      // Store in conversation history
+      this.conversationManager.addMessage(filterResult.cleanedMessage);
+
+      // Delegate to batcher for smart batching
+      await this.messageBatcher.addToBatch(
+        filterResult.cleanedMessage,
+        this.processMessage.bind(this)
+      );
       
     } catch (error) {
-      logger.error('Error handling message', {
+      logger.error('Error in message handler intermediary', {
         source: 'discord',
         error: error.message,
         stack: error.stack,
@@ -92,124 +93,25 @@ class MessageHandler {
     }
   }
 
-  async handleMessageBatching(message) {
-    const channelId = message.channel.id;
-    const userId = message.author.id;
-    
-    // Initialize channel batches if needed
-    if (!this.messageBatches.has(channelId)) {
-      this.messageBatches.set(channelId, new Map());
-    }
-    
-    const channelBatches = this.messageBatches.get(channelId);
-    
-    // Get or create batch for this user
-    if (!channelBatches.has(userId)) {
-      channelBatches.set(userId, {
-        messages: [],
-        lastMessage: null,
-        timeout: null
-      });
-    }
-    
-    const userBatch = channelBatches.get(userId);
-    
-    // Clear existing timeout if there was one
-    if (userBatch.timeout) {
-      clearTimeout(userBatch.timeout);
-    }
-    
-    // Add message to batch
-    userBatch.messages.push(message);
-    userBatch.lastMessage = message;
-    
-    logger.debug('Message added to batch', {
-      source: 'discord',
-      author: message.author.username,
-      channel: message.channel.name,
-      batchSize: userBatch.messages.length,
-      messageContent: message.content.substring(0, 50)
-    });
-    
-    // Set new timeout to process the batch
-    userBatch.timeout = setTimeout(async () => {
-      await this.processBatch(channelId, userId);
-    }, this.batchTimeout);
-  }
-  
-  async processBatch(channelId, userId) {
-    const channelBatches = this.messageBatches.get(channelId);
-    if (!channelBatches || !channelBatches.has(userId)) {
-      return;
-    }
-    
-    const userBatch = channelBatches.get(userId);
-    if (!userBatch || userBatch.messages.length === 0) {
-      return;
-    }
-    
-    const messages = userBatch.messages;
-    const lastMessage = userBatch.lastMessage;
-    
-    logger.info('Processing message batch', {
-      source: 'discord',
-      author: lastMessage.author.username,
-      channel: lastMessage.channel.name,
-      batchSize: messages.length,
-      combinedLength: messages.reduce((sum, msg) => sum + msg.content.length, 0)
-    });
-    
-    // Combine all messages in the batch
-    const combinedContent = messages.map(msg => msg.content).join(' ');
-    
-    // FIX: Create a proper synthetic message object with all required properties
-    const combinedMessage = {
-      id: lastMessage.id,
-      content: combinedContent,
-      author: {
-        id: lastMessage.author.id,
-        username: lastMessage.author.username,
-        bot: lastMessage.author.bot
-      },
-      channel: {
-        id: lastMessage.channel.id,
-        name: lastMessage.channel.name,
-        send: lastMessage.channel.send.bind(lastMessage.channel)
-      },
-      guild: lastMessage.guild ? {
-        id: lastMessage.guild.id,
-        name: lastMessage.guild.name
-      } : null,
-      createdTimestamp: lastMessage.createdTimestamp,
-      reply: lastMessage.reply.bind(lastMessage),
-      originalMessages: messages,
-      // Copy any other Discord.js properties that might be needed
-      channelId: lastMessage.channelId,
-      guildId: lastMessage.guildId
-    };
-    
-    // Generate AI response for the combined message
+  /**
+   * Process a message (called by batcher)
+   * @param {Object} message - Message to process
+   */
+  async processMessage(message) {
     try {
-      await this.responseGenerator.generateAndSendResponse(combinedMessage);
+      // Delegate to response generator
+      await this.responseGenerator.generateAndSendResponse(message);
     } catch (error) {
-      logger.error('Error processing message batch', {
+      logger.error('Error processing message', {
         source: 'discord',
         error: error.message,
-        batchSize: messages.length,
-        author: lastMessage.author.username,
-        hasChannel: !!combinedMessage.channel,
-        hasAuthor: !!combinedMessage.author
+        author: message.author?.username || 'Unknown',
+        channel: message.channel?.name || 'Unknown'
       });
-    }
-    
-    // Clean up the batch
-    channelBatches.delete(userId);
-    if (channelBatches.size === 0) {
-      this.messageBatches.delete(channelId);
     }
   }
 
-  // Public API for other components
+  // Public API - delegate to appropriate services
   getConversationHistory(channelId) {
     return this.conversationManager.getHistory(channelId);
   }
@@ -222,7 +124,10 @@ class MessageHandler {
     return this.conversationManager.getMemoryStats(channelId);
   }
 
-  // Queue-related methods
+  getBatchStats() {
+    return this.messageBatcher.getBatchStats();
+  }
+
   getQueueStats() {
     return this.responseGenerator.getQueueStats();
   }
