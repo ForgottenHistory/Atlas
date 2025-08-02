@@ -28,27 +28,77 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
       characterDescription,
       exampleMessages,
       conversationHistory = [],
-      maxHistoryLength = 10
+      llmSettings = {}
     } = context;
 
-    let prompt = '';
+    // Get token limits
+    const contextLimit = llmSettings.context_limit || 4096;
+    const safetyBuffer = Math.ceil(contextLimit * 0.1); // 10% buffer
+    const availableTokens = contextLimit - safetyBuffer;
 
-    // 1. System prompt - use strict one if none provided
-    prompt += this.formatSystemPrompt(systemPrompt || this.strictSystemPrompt);
+    // Build prompt components
+    const systemSection = this.formatSystemPrompt(systemPrompt || this.strictSystemPrompt);
+    const characterSection = this.formatCharacterIdentity(characterName, characterDescription);
+    const exampleSection = this.formatExampleMessages(exampleMessages, characterName);
+    const responseInstruction = this.formatResponseInstruction(characterName);
 
-    // 2. Character identity
-    prompt += this.formatCharacterIdentity(characterName, characterDescription);
+    // Calculate base prompt tokens (everything except history)
+    const basePrompt = systemSection + characterSection + exampleSection + responseInstruction;
+    const baseTokens = this.estimateTokenCount(basePrompt);
 
-    // 3. Example messages (cleaned up)
-    prompt += this.formatExampleMessages(exampleMessages, characterName);
+    // Calculate available tokens for conversation history
+    const historyTokenBudget = availableTokens - baseTokens;
 
-    // 4. Conversation history (limited)
-    prompt += this.formatConversationHistory(conversationHistory, maxHistoryLength);
+    // Build dynamic conversation history
+    const historySection = this.buildDynamicHistory(conversationHistory, historyTokenBudget);
 
-    // 5. Response instruction
-    prompt += this.formatResponseInstruction(characterName);
+    // Assemble final prompt
+    const finalPrompt = basePrompt + historySection;
 
-    return prompt;
+    return {
+      prompt: finalPrompt,
+      metadata: {
+        totalTokens: this.estimateTokenCount(finalPrompt),
+        baseTokens: baseTokens,
+        historyTokens: this.estimateTokenCount(historySection),
+        availableTokens: availableTokens,
+        contextLimit: contextLimit,
+        safetyBuffer: safetyBuffer,
+        messagesIncluded: historySection ? this.countMessagesInHistory(historySection) : 0
+      }
+    };
+  }
+
+  buildDynamicHistory(conversationHistory, tokenBudget) {
+    if (!conversationHistory || conversationHistory.length === 0 || tokenBudget <= 0) {
+      return '';
+    }
+
+    let historySection = 'Recent conversation:\n';
+    let currentTokens = this.estimateTokenCount(historySection);
+    let includedMessages = 0;
+
+    // Add messages from most recent to oldest until we hit token limit
+    for (const message of conversationHistory) {
+      const messageText = `${message.author || 'User'}: ${message.content || ''}\n`;
+      const messageTokens = this.estimateTokenCount(messageText);
+
+      // Check if adding this message would exceed our budget
+      if (currentTokens + messageTokens > tokenBudget) {
+        break;
+      }
+
+      historySection += messageText;
+      currentTokens += messageTokens;
+      includedMessages++;
+    }
+
+    // Return empty if we couldn't fit any messages
+    if (includedMessages === 0) {
+      return '';
+    }
+
+    return historySection + '\n';
   }
 
   formatSystemPrompt(systemPrompt) {
@@ -94,31 +144,75 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
     return section + '\n';
   }
 
-  formatConversationHistory(history, maxLength) {
-    if (!history || history.length === 0) return '';
-    
-    // Take the most recent messages
-    const recentHistory = history.slice(-maxLength);
-    
-    let section = 'Recent conversation:\n';
-    recentHistory.forEach(message => {
-      const author = message.author || 'User';
-      const content = message.content || '';
-      section += `${author}: ${content}\n`;
-    });
-    
-    return section + '\n';
-  }
-
   formatResponseInstruction(characterName) {
     const name = characterName || 'Assistant';
     return `Respond as ${name} in plain text (no actions, no formatting, no character name prefix). Just the message content:\n`;
   }
 
-  // Utility method to estimate token count (rough approximation)
+  countMessagesInHistory(historySection) {
+    if (!historySection) return 0;
+    
+    // Count lines that look like "Author: message"
+    const lines = historySection.split('\n').filter(line => line.includes(':') && line.trim() !== '');
+    return Math.max(0, lines.length - 1); // Subtract 1 for the "Recent conversation:" header
+  }
+
+  // Enhanced token counting with better accuracy
   estimateTokenCount(text) {
-    // Rough estimate: 1 token ≈ 4 characters
-    return Math.ceil(text.length / 4);
+    if (!text) return 0;
+    
+    // More accurate token estimation
+    // Remove extra whitespace and normalize
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    
+    // Average tokens per character varies by language/content
+    // For English: roughly 1 token per 3.5-4.5 characters
+    // We'll use 4 as a conservative estimate
+    const baseTokens = Math.ceil(normalized.length / 4);
+    
+    // Add some tokens for punctuation and special characters
+    const punctuationCount = (normalized.match(/[.,!?;:()[\]{}'"]/g) || []).length;
+    const specialTokens = Math.ceil(punctuationCount * 0.2);
+    
+    return baseTokens + specialTokens;
+  }
+
+  // Utility method to validate token limits
+  validateTokenLimits(context) {
+    const result = this.buildCharacterPrompt(context);
+    const { totalTokens, contextLimit, availableTokens } = result.metadata;
+    
+    return {
+      isValid: totalTokens <= availableTokens,
+      usage: {
+        used: totalTokens,
+        available: availableTokens,
+        limit: contextLimit,
+        percentage: Math.round((totalTokens / availableTokens) * 100)
+      },
+      recommendations: this.getTokenRecommendations(result.metadata)
+    };
+  }
+
+  getTokenRecommendations(metadata) {
+    const recommendations = [];
+    const { totalTokens, availableTokens, baseTokens, historyTokens } = metadata;
+    
+    const usage = totalTokens / availableTokens;
+    
+    if (usage > 0.9) {
+      recommendations.push('Consider increasing context limit or reducing system prompt length');
+    }
+    
+    if (baseTokens > availableTokens * 0.5) {
+      recommendations.push('System prompt and character description are using over 50% of available tokens');
+    }
+    
+    if (historyTokens < 100 && metadata.messagesIncluded < 3) {
+      recommendations.push('Very limited conversation history due to token constraints');
+    }
+    
+    return recommendations;
   }
 }
 

@@ -75,13 +75,6 @@ class SocketHandlers {
       });
 
       socket.emit('logsData', { logs });
-      
-      logger.debug('Logs requested via socket', { 
-        source: 'api',
-        socketId: socket.id,
-        filters: { limit, level, source, search },
-        resultCount: logs.length
-      });
     } catch (error) {
       logger.error('Failed to get logs via socket', { 
         source: 'api',

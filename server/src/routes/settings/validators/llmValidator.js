@@ -108,41 +108,84 @@ function validateSetting(key, value) {
  * @param {Object} settings - LLM settings to validate
  * @returns {Object} - { error?: string, settings?: Object }
  */
-function validateLLMSettings(settings) {
-  if (!settings || typeof settings !== 'object') {
-    return { error: 'Invalid settings object' };
-  }
-
-  const validated = {};
+function validateLLMSettings(llmSettings) {
   const errors = [];
-
-  // Validate each provided setting
-  for (const [key, value] of Object.entries(settings)) {
-    // Skip empty values for optional settings, but allow empty strings for systemPrompt
-    if (key !== 'systemPrompt' && (value === undefined || value === null || value === '')) {
-      continue;
-    }
-    
-    // For systemPrompt, allow empty string but validate if provided
-    if (key === 'systemPrompt' && (value === undefined || value === null)) {
-      continue;
-    }
-
-    const result = validateSetting(key, value);
-    if (result.isValid) {
-      validated[key] = result.validatedValue;
+  const validatedSettings = {};
+  
+  console.log('Validating LLM settings:', llmSettings);
+  
+  // Validate model (string)
+  if (llmSettings.model !== undefined) {
+    if (typeof llmSettings.model === 'string') {
+      validatedSettings.model = llmSettings.model.trim();
     } else {
-      errors.push(result.error);
+      errors.push('Model must be a string');
     }
   }
-
-  if (errors.length > 0) {
-    return { error: errors.join(', ') };
+  
+  // Validate system prompt (string)
+  if (llmSettings.systemPrompt !== undefined) {
+    if (typeof llmSettings.systemPrompt === 'string') {
+      validatedSettings.systemPrompt = llmSettings.systemPrompt;
+    } else {
+      errors.push('System prompt must be a string');
+    }
   }
-
-  // Return validated settings (only non-empty values)
-  return { settings: validated };
+  
+  // Validate numeric parameters
+  const numericFields = {
+    temperature: { min: 0, max: 2, required: false },
+    top_p: { min: 0.01, max: 1, required: false },
+    top_k: { min: -1, max: 1000, required: false, integer: true },
+    frequency_penalty: { min: -2, max: 2, required: false },
+    presence_penalty: { min: -2, max: 2, required: false },
+    repetition_penalty: { min: 0.1, max: 2, required: false },
+    min_p: { min: 0, max: 1, required: false },
+    max_tokens: { min: 1, max: 8192, required: false, integer: true },
+    max_characters: { min: 50, max: 4000, required: false, integer: true },
+    context_limit: { min: 512, max: 32768, required: false, integer: true }
+  };
+  
+  for (const [field, config] of Object.entries(numericFields)) {
+    if (llmSettings[field] !== undefined) {
+      const value = llmSettings[field];
+      
+      // Allow empty strings (will be ignored)
+      if (value === '' || value === null) {
+        continue;
+      }
+      
+      const numValue = config.integer ? parseInt(value) : parseFloat(value);
+      
+      if (isNaN(numValue)) {
+        errors.push(`${field} must be a number`);
+        continue;
+      }
+      
+      if (numValue < config.min || numValue > config.max) {
+        errors.push(`${field} must be between ${config.min} and ${config.max}`);
+        continue;
+      }
+      
+      validatedSettings[field] = numValue;
+    }
+  }
+  
+  console.log('Validation results:', { 
+    errors, 
+    validatedSettings,
+    hasErrors: errors.length > 0 
+  });
+  
+  return {
+    error: errors.length > 0 ? errors.join(', ') : null,
+    settings: validatedSettings
+  };
 }
+
+module.exports = {
+  validateLLMSettings
+};
 
 /**
  * Get default LLM settings

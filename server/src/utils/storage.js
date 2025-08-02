@@ -42,14 +42,27 @@ class Storage {
         botToken: '',
         commandPrefix: '!',
         llm: {
+          model: '',
+          systemPrompt: '',
           temperature: 0.6,
           top_p: 1,
-          repetition_penalty: 1
+          top_k: '',
+          frequency_penalty: '',
+          presence_penalty: '',
+          repetition_penalty: 1,
+          min_p: '',
+          max_characters: 2000,
+          context_limit: 4096
         }
       },
       persona: {
         name: '',
-        description: ''
+        description: '',
+        mes_example: '',
+        creator_notes: '',
+        tags: [],
+        creator: '',
+        character_version: ''
       },
       stats: {
         activeUsers: 1234,
@@ -85,6 +98,12 @@ class Storage {
   async updateLLMSettings(llmSettings) {
     if (!this.data) return false;
     
+    // Ensure the llm object exists
+    if (!this.data.settings.llm) {
+      this.data.settings.llm = this.getDefaultData().settings.llm;
+    }
+    
+    // Merge new LLM settings with existing ones
     this.data.settings.llm = { ...this.data.settings.llm, ...llmSettings };
     return await this.save();
   }
@@ -94,7 +113,10 @@ class Storage {
   }
 
   getLLMSettings() {
-    return this.data?.settings?.llm || this.getDefaultData().settings.llm;
+    const settings = this.getSettings();
+    // Ensure we have all default LLM settings
+    const defaultLLM = this.getDefaultData().settings.llm;
+    return { ...defaultLLM, ...(settings.llm || {}) };
   }
 
   // Persona methods

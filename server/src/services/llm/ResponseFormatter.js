@@ -1,10 +1,13 @@
 class ResponseFormatter {
   constructor() {
-    this.maxResponseLength = 2000; // Discord message limit
+    this.discordMessageLimit = 2000; // Discord's hard limit
+    this.defaultMaxCharacters = 2000; // Our default setting
   }
 
-  formatCharacterResponse(rawResponse, characterName) {
+  formatCharacterResponse(rawResponse, characterName, maxCharacters = null) {
     if (!rawResponse) return '';
+    
+    const characterLimit = maxCharacters || this.defaultMaxCharacters;
     
     console.log('Original response:', rawResponse);
     
@@ -22,8 +25,8 @@ class ResponseFormatter {
     // Clean up common LLM artifacts
     formatted = this.cleanLLMArtifacts(formatted);
     
-    // Ensure reasonable length
-    formatted = this.truncateIfNeeded(formatted);
+    // Apply character limit (with smart truncation)
+    formatted = this.limitCharacters(formatted, characterLimit);
     
     // Final cleanup
     formatted = this.finalCleanup(formatted);
@@ -31,6 +34,37 @@ class ResponseFormatter {
     console.log('Formatted response:', formatted);
     
     return formatted;
+  }
+
+  limitCharacters(text, maxCharacters) {
+    if (!text || text.length <= maxCharacters) {
+      return text;
+    }
+
+    // Ensure we don't exceed Discord's hard limit either
+    const effectiveLimit = Math.min(maxCharacters, this.discordMessageLimit);
+    
+    // Try to truncate at sentence boundary
+    const truncated = text.substring(0, effectiveLimit);
+    const lastSentence = Math.max(
+      truncated.lastIndexOf('.'),
+      truncated.lastIndexOf('!'),
+      truncated.lastIndexOf('?')
+    );
+    
+    // If we found a sentence ending in the last 30% of the limit, use it
+    if (lastSentence > effectiveLimit * 0.7) {
+      return truncated.substring(0, lastSentence + 1).trim();
+    }
+    
+    // Otherwise, try to truncate at word boundary
+    const lastSpace = truncated.lastIndexOf(' ');
+    if (lastSpace > effectiveLimit * 0.8) {
+      return truncated.substring(0, lastSpace).trim() + '...';
+    }
+    
+    // Last resort: hard truncate with ellipsis
+    return truncated.substring(0, effectiveLimit - 3).trim() + '...';
   }
 
   removeRPActions(text) {
@@ -137,30 +171,6 @@ class ResponseFormatter {
       .trim();
   }
 
-  truncateIfNeeded(text) {
-    if (text.length <= this.maxResponseLength) return text;
-    
-    // Try to truncate at sentence boundary
-    const truncated = text.substring(0, this.maxResponseLength);
-    const lastSentence = truncated.lastIndexOf('.');
-    const lastQuestion = truncated.lastIndexOf('?');
-    const lastExclamation = truncated.lastIndexOf('!');
-    
-    const lastPunctuation = Math.max(lastSentence, lastQuestion, lastExclamation);
-    
-    if (lastPunctuation > this.maxResponseLength * 0.7) {
-      return truncated.substring(0, lastPunctuation + 1);
-    }
-    
-    // Fallback: truncate at word boundary
-    const lastSpace = truncated.lastIndexOf(' ');
-    if (lastSpace > this.maxResponseLength * 0.8) {
-      return truncated.substring(0, lastSpace) + '...';
-    }
-    
-    return truncated + '...';
-  }
-
   finalCleanup(text) {
     return text
       .trim()
@@ -180,8 +190,9 @@ class ResponseFormatter {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  validateResponse(response) {
+  validateResponse(response, maxCharacters = null) {
     const issues = [];
+    const characterLimit = maxCharacters || this.defaultMaxCharacters;
     
     if (!response || response.trim().length === 0) {
       issues.push('Empty response');
@@ -191,13 +202,46 @@ class ResponseFormatter {
       issues.push('Response too short');
     }
     
-    if (response.length > this.maxResponseLength * 1.5) {
-      issues.push('Response too long');
+    if (response.length > characterLimit) {
+      issues.push(`Response exceeds character limit (${response.length}/${characterLimit})`);
+    }
+    
+    if (response.length > this.discordMessageLimit) {
+      issues.push(`Response exceeds Discord limit (${response.length}/${this.discordMessageLimit})`);
+    }
+    
+    // Check for remaining formatting artifacts
+    if (response.includes('*')) {
+      issues.push('Contains asterisks (possible RP actions)');
+    }
+    
+    if (response.match(/^[A-Za-z\s]*:/)) {
+      issues.push('Contains character name prefix');
     }
     
     return {
       isValid: issues.length === 0,
-      issues
+      issues,
+      characterCount: response.length,
+      characterLimit: characterLimit,
+      discordSafe: response.length <= this.discordMessageLimit
+    };
+  }
+
+  // Utility method to estimate how much the response was truncated
+  getTruncationInfo(originalLength, finalLength, characterLimit) {
+    const wasTruncated = finalLength < originalLength;
+    const truncationPercentage = wasTruncated 
+      ? Math.round(((originalLength - finalLength) / originalLength) * 100)
+      : 0;
+      
+    return {
+      wasTruncated,
+      originalLength,
+      finalLength,
+      characterLimit,
+      truncationPercentage,
+      savedCharacters: originalLength - finalLength
     };
   }
 }

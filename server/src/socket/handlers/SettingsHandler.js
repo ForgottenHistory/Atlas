@@ -11,7 +11,7 @@ class SettingsHandler {
     try {
       console.log('Settings updated via socket:', settingsData);
       
-      const { updates, updated, needsBotRestart, error } = this._processSettingsData(settingsData);
+      const { updates, llmUpdates, updated, needsBotRestart, error } = this._processSettingsData(settingsData);
       
       if (error) {
         socket.emit('settingsUpdated', { success: false, error });
@@ -23,7 +23,20 @@ class SettingsHandler {
         return;
       }
 
-      const success = await this.storage.updateSettings(updates);
+      let success = true;
+      
+      // Save general settings if any
+      if (Object.keys(updates).length > 0) {
+        success = await this.storage.updateSettings(updates);
+        console.log('General settings update result:', success);
+      }
+      
+      // Save LLM settings separately if any
+      if (Object.keys(llmUpdates).length > 0) {
+        const llmSuccess = await this.storage.updateLLMSettings(llmUpdates);
+        console.log('LLM settings update result:', llmSuccess, 'Data:', llmUpdates);
+        success = success && llmSuccess;
+      }
       
       if (success) {
         const activity = await this.storage.addActivity(`Settings updated: ${updated.join(', ')}`);
@@ -34,7 +47,10 @@ class SettingsHandler {
         
         socket.emit('settingsUpdated', { success: true });
         this.io.emit('newActivity', activity);
+        
+        console.log('Settings successfully saved');
       } else {
+        console.error('Failed to save settings to storage');
         socket.emit('settingsUpdated', { success: false, error: 'Failed to save settings' });
       }
     } catch (error) {
@@ -46,6 +62,7 @@ class SettingsHandler {
   _processSettingsData(settingsData) {
     let updated = [];
     const updates = {};
+    const llmUpdates = {};
     let needsBotRestart = false;
     
     // Handle bot token
@@ -63,8 +80,10 @@ class SettingsHandler {
       }
     }
 
-    // Handle LLM settings
+    // Handle LLM settings - this is the key fix!
     if (settingsData.llm && typeof settingsData.llm === 'object') {
+      console.log('Processing LLM settings:', settingsData.llm);
+      
       const llmValidation = validateLLMSettings(settingsData.llm);
       
       if (llmValidation.error) {
@@ -73,11 +92,14 @@ class SettingsHandler {
         };
       }
       
-      updates.llm = llmValidation.settings;
+      // Store LLM settings separately
+      Object.assign(llmUpdates, llmValidation.settings);
       updated.push('LLM configuration');
+      
+      console.log('Validated LLM settings:', llmValidation.settings);
     }
 
-    return { updates, updated, needsBotRestart };
+    return { updates, llmUpdates, updated, needsBotRestart };
   }
 
   async _handleBotRestart(newToken) {
