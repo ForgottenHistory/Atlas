@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { User, FileText, Upload, Tag, MessageSquare } from 'lucide-react';
 import { Button, Input, Textarea, Alert, Card, Modal, Badge } from './shared';
 import CharacterUpload from './persona/CharacterUpload';
@@ -14,9 +14,44 @@ function Persona({ onUpdatePersona }) {
     character_version: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [newTag, setNewTag] = useState('');
+
+  // Load current persona data on component mount
+  useEffect(() => {
+    loadPersonaData();
+  }, []);
+
+  const loadPersonaData = async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch('http://localhost:3001/api/persona');
+      const result = await response.json();
+      
+      if (result.success && result.data) {
+        const persona = result.data;
+        setFormData({
+          characterName: persona.name || '',
+          personalityDescription: persona.description || '',
+          mes_example: persona.mes_example || '',
+          creator_notes: persona.creator_notes || '',
+          tags: Array.isArray(persona.tags) ? persona.tags : [],
+          creator: persona.creator || '',
+          character_version: persona.character_version || ''
+        });
+      }
+    } catch (error) {
+      console.error('Error loading persona data:', error);
+      setMessage({ 
+        type: 'error', 
+        text: 'Failed to load current persona data. You can still edit and save.' 
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleInputChange = (e) => {
     setFormData({
@@ -90,6 +125,24 @@ function Persona({ onUpdatePersona }) {
   };
 
   const clearMessage = () => setMessage({ type: '', text: '' });
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div>
+        <h2 className="text-2xl font-bold mb-6">Bot Persona</h2>
+        
+        <Card>
+          <Card.Content>
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400 mx-auto mb-4"></div>
+              <p className="text-gray-400">Loading persona data...</p>
+            </div>
+          </Card.Content>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div>
