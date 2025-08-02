@@ -13,8 +13,49 @@ class ResponseProcessor {
     // Log truncation warnings
     this.logTruncationWarnings(result, message.channel.name);
 
-    // Send the response
-    const response = await message.reply(result.response);
+    // NEW: Smart reply logic - check if we should use reply or send
+    let response;
+    try {
+      logger.debug('Checking if should use reply function', {
+        source: 'discord',
+        channel: message.channel.name,
+        messageId: message.id,
+        author: message.author.username
+      });
+      
+      const shouldUseReply = await this.shouldUseReply(message);
+      
+      logger.info('Reply decision made', {
+        source: 'discord',
+        shouldUseReply: shouldUseReply,
+        channel: message.channel.name,
+        messageId: message.id
+      });
+      
+      if (shouldUseReply) {
+        response = await message.reply(result.response);
+        logger.debug('Used Discord reply function', {
+          source: 'discord',
+          channel: message.channel.name,
+          messageId: message.id
+        });
+      } else {
+        response = await message.channel.send(result.response);
+        logger.debug('Used normal send instead of reply', {
+          source: 'discord',
+          channel: message.channel.name,
+          reason: 'shouldUseReply_returned_false'
+        });
+      }
+    } catch (error) {
+      // Fallback to normal send if reply fails
+      logger.warn('Reply failed, falling back to send', {
+        source: 'discord',
+        error: error.message,
+        channel: message.channel.name
+      });
+      response = await message.channel.send(result.response);
+    }
     
     logger.success('AI response sent successfully', {
       source: 'llm',
@@ -33,6 +74,103 @@ class ResponseProcessor {
     await storage.addActivity(activityMessage);
 
     return response;
+  }
+
+  /**
+   * Determine if we should use Discord's reply function or just send normally
+   * @param {Object} message - The message we're responding to
+   * @returns {boolean} - True if we should use reply, false for normal send
+   */
+  async shouldUseReply(message) {
+    logger.debug('shouldUseReply method called', {
+      source: 'discord',
+      messageId: message.id,
+      channel: message.channel.name,
+      author: message.author.username
+    });
+    
+    try {
+      // Fetch recent messages to check if user's message is the latest
+      logger.debug('Fetching recent messages to check position', {
+        source: 'discord',
+        channel: message.channel.name
+      });
+      
+      const lastMessages = await message.channel.messages.fetch({ limit: 5 });
+      const messagesArray = Array.from(lastMessages.values())
+        .sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+      
+      logger.debug('Fetched messages for analysis', {
+        source: 'discord',
+        messagesCount: messagesArray.length,
+        channel: message.channel.name,
+        messageIds: messagesArray.map(m => ({ id: m.id, author: m.author.username }))
+      });
+      
+      // Find the message we're responding to
+      const messageIndex = messagesArray.findIndex(msg => msg.id === message.id);
+      
+      logger.debug('Message position analysis', {
+        source: 'discord',
+        targetMessageId: message.id,
+        messageIndex: messageIndex,
+        isLatest: messageIndex === 0
+      });
+      
+      // If we can't find the message or it's not the most recent, use reply
+      if (messageIndex !== 0) {
+        logger.debug('Message is not the latest, using reply', {
+          source: 'discord',
+          messageIndex: messageIndex,
+          channel: message.channel.name
+        });
+        return true;
+      }
+      
+      // If this is the most recent message, check if there are other recent messages
+      // Don't use reply if this message is clearly part of a recent conversation flow
+      if (messagesArray.length >= 2) {
+        const currentMessage = messagesArray[0]; // The user's message we're responding to
+        const previousMessage = messagesArray[1]; // Message before it
+        
+        const timeDifference = currentMessage.createdTimestamp - previousMessage.createdTimestamp;
+        const isRecentFlow = timeDifference < 60000; // Within 1 minute
+        
+        logger.debug('Time difference analysis', {
+          source: 'discord',
+          timeDifference: timeDifference,
+          isRecentFlow: isRecentFlow,
+          threshold: 60000,
+          previousAuthor: previousMessage.author.username,
+          currentAuthor: currentMessage.author.username
+        });
+        
+        if (isRecentFlow) {
+          logger.debug('Message is part of recent conversation flow, skipping reply', {
+            source: 'discord',
+            timeDifference: timeDifference,
+            previousAuthor: previousMessage.author.username,
+            currentAuthor: currentMessage.author.username,
+            channel: message.channel.name
+          });
+          return false; // Use normal send
+        }
+      }
+      
+      // For standalone messages or old conversations, use reply
+      logger.debug('Using reply for standalone or old message', {
+        source: 'discord',
+        channel: message.channel.name
+      });
+      return true;
+      
+    } catch (error) {
+      logger.warn('Error checking message position, defaulting to reply', {
+        source: 'discord',
+        error: error.message
+      });
+      return true; // Default to reply if we can't check
+    }
   }
 
   async handleFailedResponse(message, result) {

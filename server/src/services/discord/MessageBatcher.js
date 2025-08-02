@@ -92,42 +92,23 @@ class MessageBatcher {
     // Combine all messages in the batch
     const combinedContent = messages.map(msg => msg.content).join(' ');
     
-    // Create proper synthetic message object
-    const combinedMessage = {
-      id: lastMessage.id,
-      content: combinedContent,
-      author: {
-        id: lastMessage.author.id,
-        username: lastMessage.author.username,
-        bot: lastMessage.author.bot
-      },
-      channel: {
-        id: lastMessage.channel.id,
-        name: lastMessage.channel.name,
-        send: lastMessage.channel.send.bind(lastMessage.channel)
-      },
-      guild: lastMessage.guild ? {
-        id: lastMessage.guild.id,
-        name: lastMessage.guild.name
-      } : null,
-      createdTimestamp: lastMessage.createdTimestamp,
-      reply: lastMessage.reply.bind(lastMessage),
-      originalMessages: messages,
-      channelId: lastMessage.channelId,
-      guildId: lastMessage.guildId
-    };
+    // FIX: Don't create a new object, modify the original message directly
+    const originalContent = lastMessage.content;
+    lastMessage.content = combinedContent;
+    lastMessage.originalMessages = messages;
+    lastMessage.originalContent = originalContent;
     
-    // Process the batch using callback
+    // Process the batch using callback with the modified original message
     try {
-      await processCallback(combinedMessage);
+      await processCallback(lastMessage);
     } catch (error) {
       logger.error('Error processing message batch', {
         source: 'discord',
         error: error.message,
         batchSize: messages.length,
         author: lastMessage.author.username,
-        hasChannel: !!combinedMessage.channel,
-        hasAuthor: !!combinedMessage.author
+        hasChannel: !!lastMessage.channel,
+        hasAuthor: !!lastMessage.author
       });
     }
     
