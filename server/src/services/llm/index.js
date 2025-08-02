@@ -1,6 +1,7 @@
 const PromptBuilder = require('./PromptBuilder');
 const LLMClient = require('./LLMClient');
 const ResponseFormatter = require('./ResponseFormatter');
+const RequestQueue = require('./RequestQueue');
 const logger = require('../logger/Logger');
 
 class LLMService {
@@ -8,16 +9,27 @@ class LLMService {
     this.promptBuilder = new PromptBuilder();
     this.llmClient = new LLMClient();
     this.responseFormatter = new ResponseFormatter();
+    this.requestQueue = new RequestQueue();
     
-    logger.info('LLM Service initialized', { 
+    logger.info('LLM Service initialized with request queue', { 
       source: 'llm',
-      provider: this.llmClient.getCurrentProvider()
+      provider: this.llmClient.getCurrentProvider(),
+      queueEnabled: true
     });
   }
 
   async generateCharacterResponse(context) {
+    // Queue the character response generation
+    return await this.requestQueue.enqueue(
+      'character_generation',
+      context,
+      this._processCharacterResponse.bind(this)
+    );
+  }
+
+  async _processCharacterResponse(context) {
     try {
-      logger.info('Starting character response generation', {
+      logger.info('Processing character response generation', {
         source: 'llm',
         character: context.characterName,
         hasHistory: (context.conversationHistory || []).length > 0,
@@ -133,11 +145,12 @@ class LLMService {
           validation: responseValidation,
           tokenUsage: tokenUsage,
           truncationInfo: truncationInfo,
-          characterLimit: maxCharacters
+          characterLimit: maxCharacters,
+          queueProcessed: true
         }
       };
     } catch (error) {
-      logger.error('LLM Service error', {
+      logger.error('LLM Service error during character response', {
         source: 'llm',
         error: error.message,
         stack: error.stack,
@@ -155,8 +168,17 @@ class LLMService {
 
   // Enhanced method for custom responses with token management
   async generateCustomResponse(prompt, settings = {}) {
+    // Queue the custom response generation
+    return await this.requestQueue.enqueue(
+      'custom_prompt',
+      { prompt, settings },
+      this._processCustomResponse.bind(this)
+    );
+  }
+
+  async _processCustomResponse({ prompt, settings }) {
     try {
-      logger.info('Generating custom response', {
+      logger.info('Processing custom response generation', {
         source: 'llm',
         promptLength: prompt.length,
         provider: this.llmClient.getCurrentProvider(),
@@ -185,7 +207,8 @@ class LLMService {
         source: 'llm',
         responseLength: finalResponse.length,
         responseTime: `${responseTime}ms`,
-        wasTruncated: truncationInfo?.wasTruncated || false
+        wasTruncated: truncationInfo?.wasTruncated || false,
+        queueProcessed: true
       });
 
       return { 
@@ -194,7 +217,8 @@ class LLMService {
         metadata: {
           responseTime: responseTime,
           truncationInfo: truncationInfo,
-          originalLength: rawResponse.length
+          originalLength: rawResponse.length,
+          queueProcessed: true
         }
       };
     } catch (error) {
@@ -205,6 +229,34 @@ class LLMService {
 
       return { success: false, error: error.message };
     }
+  }
+
+  // Queue management methods
+  getQueueStats() {
+    return this.requestQueue.getQueueStats();
+  }
+
+  getQueueHealth() {
+    return this.requestQueue.isHealthy();
+  }
+
+  setQueueConcurrencyLimit(requestType, limit) {
+    this.requestQueue.setConcurrencyLimit(requestType, limit);
+    
+    logger.info('Queue concurrency limit updated via LLM Service', {
+      source: 'llm',
+      requestType,
+      newLimit: limit
+    });
+  }
+
+  setGlobalConcurrencyLimit(limit) {
+    this.requestQueue.setGlobalConcurrencyLimit(limit);
+    
+    logger.info('Global queue concurrency limit updated via LLM Service', {
+      source: 'llm',
+      newLimit: limit
+    });
   }
 
   // Method to get token usage statistics
