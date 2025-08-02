@@ -52,7 +52,7 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
     const historySection = this.buildDynamicHistory(conversationHistory, historyTokenBudget);
 
     // Assemble final prompt
-    const finalPrompt = basePrompt + historySection;
+    const finalPrompt = basePrompt + historySection + `${characterName}: ` ;
 
     return {
       prompt: finalPrompt,
@@ -73,7 +73,7 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
       return '';
     }
 
-    let historySection = 'Conversation History:\n';
+    let historySection = '## Conversation History:\n';
     let currentTokens = this.estimateTokenCount(historySection);
     let includedMessages = 0;
 
@@ -97,7 +97,7 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
       return '';
     }
 
-    return historySection + '\n';
+    return historySection;
   }
 
   formatSystemPrompt(systemPrompt) {
@@ -120,7 +120,7 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
   formatExampleMessages(exampleMessages, characterName) {
     if (!exampleMessages || !exampleMessages.trim()) return '';
     
-    let section = 'Example messages (respond in similar style but without actions or formatting):\n';
+    let section = 'Example messages:\n';
     
     // Clean up examples to show the desired format
     const examples = exampleMessages.trim();
