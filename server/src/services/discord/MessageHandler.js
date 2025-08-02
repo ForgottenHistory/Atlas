@@ -5,6 +5,8 @@ const CommandHandler = require('./commands/CommandHandler');
 const ResponseGenerator = require('./response/ResponseGenerator');
 const MessageFilter = require('./MessageFilter');
 const MessageBatcher = require('./MessageBatcher');
+const MultiLLMDecisionEngine = require('../llm/MultiLLMDecisionEngine');
+const ActionExecutor = require('./ActionExecutor');
 
 class MessageHandler {
   constructor(discordClient, channelManager) {
@@ -19,11 +21,15 @@ class MessageHandler {
     this.messageFilter = new MessageFilter();
     this.messageBatcher = new MessageBatcher(3000); // 3 second timeout
     
+    // NEW: Autonomous decision making
+    this.decisionEngine = new MultiLLMDecisionEngine();
+    this.actionExecutor = new ActionExecutor(discordClient, this.conversationManager);
+    
     this.setupMessageListener();
     
-    logger.info('MessageHandler initialized as thin intermediary', { 
+    logger.info('MessageHandler initialized with autonomous decision making', { 
       source: 'discord',
-      services: ['ConversationManager', 'CommandHandler', 'ResponseGenerator', 'MessageFilter', 'MessageBatcher']
+      services: ['ConversationManager', 'CommandHandler', 'ResponseGenerator', 'MessageFilter', 'MessageBatcher', 'DecisionEngine', 'ActionExecutor']
     });
   }
 
@@ -73,14 +79,11 @@ class MessageHandler {
       // Store in conversation history
       this.conversationManager.addMessage(filterResult.cleanedMessage);
 
-      // Delegate to batcher for smart batching
-      await this.messageBatcher.addToBatch(
-        filterResult.cleanedMessage,
-        this.processMessage.bind(this)
-      );
+      // NEW: Make autonomous decision instead of always responding
+      await this.makeAutonomousDecision(filterResult.cleanedMessage);
       
     } catch (error) {
-      logger.error('Error in message handler intermediary', {
+      logger.error('Error in message handler', {
         source: 'discord',
         error: error.message,
         stack: error.stack,
@@ -89,20 +92,105 @@ class MessageHandler {
         channel: message.channel.name
       });
       
+      // Fallback to simple response on error
       await message.reply('Sorry, something went wrong processing that message.').catch(() => {});
     }
   }
 
   /**
-   * Process a message (called by batcher)
-   * @param {Object} message - Message to process
+   * NEW: Autonomous decision making for each message
+   */
+  async makeAutonomousDecision(message) {
+    try {
+      // Build context for decision making
+      const channelContext = this.buildChannelContext(message);
+      
+      // Get decision from LLM
+      const decision = await this.decisionEngine.makeQuickDecision(message, channelContext);
+      
+      logger.info('Autonomous decision made', {
+        source: 'discord',
+        action: decision.action,
+        confidence: decision.confidence,
+        reasoning: decision.reasoning,
+        channel: message.channel.name,
+        author: message.author.username,
+        messagePreview: message.content.substring(0, 50)
+      });
+
+      // Execute the decided action
+      const result = await this.actionExecutor.executeAction(decision, message);
+      
+      if (result.success) {
+        // Update decision engine timing
+        this.decisionEngine.updateLastActionTime();
+        
+        // Log successful action
+        logger.success('Autonomous action completed', {
+          source: 'discord',
+          actionType: result.actionType,
+          channel: message.channel.name
+        });
+      } else {
+        logger.warn('Autonomous action failed', {
+          source: 'discord',
+          error: result.error,
+          channel: message.channel.name
+        });
+      }
+      
+    } catch (error) {
+      logger.error('Autonomous decision making failed', {
+        source: 'discord',
+        error: error.message,
+        fallback: 'ignoring message',
+        channel: message.channel.name
+      });
+    }
+  }
+
+  /**
+   * Build context information for decision making
+   */
+  buildChannelContext(message) {
+    const memoryStats = this.conversationManager.getMemoryStats(message.channel.id);
+    const recentHistory = this.conversationManager.getHistory(message.channel.id);
+    
+    // Calculate activity level based on recent messages
+    const recentMessages = recentHistory.slice(-10); // Last 10 messages
+    const timeWindow = 5 * 60 * 1000; // 5 minutes
+    const now = new Date();
+    const recentActivity = recentMessages.filter(msg => 
+      (now - new Date(msg.timestamp)) < timeWindow
+    );
+    
+    let activityLevel = 'quiet';
+    if (recentActivity.length > 5) activityLevel = 'active';
+    else if (recentActivity.length > 2) activityLevel = 'normal';
+
+    return {
+      channelId: message.channel.id,
+      channelName: message.channel.name || 'Unknown',
+      serverId: message.guild?.id || 'DM',
+      serverName: message.guild?.name || 'Direct Message',
+      activityLevel: activityLevel,
+      recentMessageCount: recentActivity.length,
+      totalMessages: memoryStats.totalMessages,
+      lastAction: 'none', // TODO: Track last action per channel
+      canReact: this.actionExecutor.canActInChannel(message.channel),
+      conversationContext: recentMessages.slice(-3) // Last 3 messages for context
+    };
+  }
+
+  /**
+   * Legacy method for direct response (still used by batcher)
    */
   async processMessage(message) {
     try {
-      // Delegate to response generator
+      // Generate response using existing system
       await this.responseGenerator.generateAndSendResponse(message);
     } catch (error) {
-      logger.error('Error processing message', {
+      logger.error('Error processing message via legacy path', {
         source: 'discord',
         error: error.message,
         author: message.author?.username || 'Unknown',
@@ -134,6 +222,14 @@ class MessageHandler {
 
   getQueueHealth() {
     return this.responseGenerator.getQueueHealth();
+  }
+
+  // NEW: Get decision engine stats
+  getDecisionStats() {
+    return {
+      lastDecisionTime: this.decisionEngine.lastDecisionTime,
+      timeSinceLastAction: this.decisionEngine.timeSinceLastAction()
+    };
   }
 
   // Event system

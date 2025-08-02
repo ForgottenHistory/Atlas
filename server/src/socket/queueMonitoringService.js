@@ -43,12 +43,6 @@ class QueueMonitoringService {
       
       if (hasActivity) {
         this.broadcastQueueUpdate(stats, health);
-        
-        logger.debug('Periodic queue update sent', {
-          source: 'system',
-          totalQueued: health.totalQueued,
-          activeGlobal: health.activeGlobal
-        });
       }
     }, 1000); // Every second
   }
