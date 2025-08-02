@@ -2,6 +2,7 @@ const { getBotData, updateRuntimeData } = require('../routes/bot');
 const storage = require('../utils/storage');
 const discordService = require('../services/discord');
 const logger = require('../services/logger/Logger');
+const LLMServiceSingleton = require('../services/llm/LLMServiceSingleton');
 const BotConnectionHandler = require('./handlers/BotConnectionHandler');
 const PersonaHandler = require('./handlers/PersonaHandler');
 const SettingsHandler = require('./handlers/SettingsHandler');
@@ -10,6 +11,7 @@ const DiscordServerHandler = require('./handlers/DiscordServerHandler');
 class SocketHandlers {
   constructor(io) {
     this.io = io;
+    this.llmService = LLMServiceSingleton.getInstance();
     this.botConnectionHandler = new BotConnectionHandler(io, discordService, { getBotData, updateRuntimeData }, storage);
     this.personaHandler = new PersonaHandler(io, storage);
     this.settingsHandler = new SettingsHandler(io, storage, discordService);
@@ -102,6 +104,81 @@ class SocketHandlers {
         source: 'api',
         socketId: socket.id,
         error: error.message
+      });
+    }
+  }
+
+  // Queue handlers
+  handleGetQueueStats(socket) {
+    try {
+      const stats = this.llmService.getQueueStats();
+      const health = this.llmService.getQueueHealth();
+      
+      logger.debug('Manual queue stats requested', {
+        source: 'system',
+        socketId: socket.id,
+        stats: stats,
+        health: health
+      });
+      
+      socket.emit('queueStats', {
+        stats,
+        health,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      logger.error('Failed to get queue stats via socket', {
+        source: 'system',
+        socketId: socket.id,
+        error: error.message
+      });
+      
+      socket.emit('queueStats', { 
+        error: 'Failed to retrieve queue stats',
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
+  handleUpdateQueueConfig(socket, data) {
+    try {
+      const { globalLimit, typeLimit, requestType } = data;
+      
+      if (globalLimit !== undefined) {
+        this.llmService.setGlobalConcurrencyLimit(globalLimit);
+        logger.info('Global queue limit updated via socket', {
+          source: 'system',
+          socketId: socket.id,
+          newLimit: globalLimit
+        });
+      }
+      
+      if (typeLimit !== undefined && requestType) {
+        this.llmService.setQueueConcurrencyLimit(requestType, typeLimit);
+        logger.info('Request type queue limit updated via socket', {
+          source: 'system',
+          socketId: socket.id,
+          requestType,
+          newLimit: typeLimit
+        });
+      }
+      
+      // Stats will be automatically broadcasted by the queue listener
+      socket.emit('queueConfigUpdated', { 
+        success: true,
+        message: 'Queue configuration updated'
+      });
+      
+    } catch (error) {
+      logger.error('Failed to update queue config via socket', {
+        source: 'system',
+        socketId: socket.id,
+        error: error.message
+      });
+      
+      socket.emit('queueConfigUpdated', { 
+        success: false, 
+        error: 'Failed to update queue configuration' 
       });
     }
   }
