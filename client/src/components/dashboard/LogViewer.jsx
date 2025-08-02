@@ -83,7 +83,15 @@ function LogViewer({ socketService }) {
     let filtered = [...logs];
 
     if (filters.level) {
-      filtered = filtered.filter(log => log.level === filters.level);
+      if (filters.level === 'prompt') {
+        // Filter for prompt logs
+        filtered = filtered.filter(log => 
+          log.message?.includes('AI prompt generated') && log.details?.fullPrompt
+        );
+      } else {
+        // Filter for regular levels
+        filtered = filtered.filter(log => log.level === filters.level);
+      }
     }
 
     if (filters.source) {
@@ -143,6 +151,7 @@ function LogViewer({ socketService }) {
 
   const levelOptions = [
     { value: '', label: 'All Levels' },
+    { value: 'prompt', label: 'Prompts' },
     { value: 'error', label: 'Error' },
     { value: 'warn', label: 'Warning' },
     { value: 'info', label: 'Info' },

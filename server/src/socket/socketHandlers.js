@@ -19,6 +19,9 @@ class SocketHandlers {
     
     // Setup logger listener for real-time log broadcasting
     this.setupLoggerListener();
+    
+    // Setup prompt listener for real-time prompt broadcasting
+    this.setupPromptListener();
   }
 
   setupLoggerListener() {
@@ -30,6 +33,62 @@ class SocketHandlers {
         this.io.emit('logsCleared');
       }
     });
+  }
+
+  setupPromptListener() {
+    // Listen for prompt generation events from the LLM service
+    process.on('promptGenerated', (promptData) => {
+      // Create a special log entry for prompts
+      const promptLogEntry = {
+        id: Date.now() + Math.random(),
+        timestamp: new Date().toISOString(),
+        level: 'info',
+        message: `AI prompt generated for ${promptData.character}`,
+        details: {
+          source: 'llm',
+          character: promptData.character,
+          promptLength: promptData.prompt?.length || 0,
+          tokenUsage: promptData.tokenUsage,
+          channel: promptData.channel,
+          author: promptData.author,
+          fullPrompt: promptData.prompt
+        },
+        source: 'llm'
+      };
+
+      // Broadcast as a special log entry
+      this.io.emit('newLog', promptLogEntry);
+      
+      logger.debug('Prompt data broadcasted as log entry', {
+        source: 'api',
+        promptLength: promptData.prompt?.length || 0,
+        character: promptData.character,
+        connectedClients: this.io.engine.clientsCount
+      });
+    });
+  }
+
+  // Prompt data handlers
+  handleGetLastPrompt(socket) {
+    try {
+      const promptData = global.lastPromptData || null;
+      
+      logger.debug('Last prompt requested via socket', {
+        source: 'api',
+        socketId: socket.id,
+        hasPromptData: !!promptData
+      });
+      
+      socket.emit('promptData', { prompt: promptData });
+    } catch (error) {
+      logger.error('Failed to get last prompt via socket', {
+        source: 'api',
+        socketId: socket.id,
+        error: error.message
+      });
+      
+      socket.emit('promptData', { prompt: null, error: 'Failed to retrieve prompt data' });
+    }
   }
 
   // Bot connection handlers

@@ -40,10 +40,9 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
     const systemSection = this.formatSystemPrompt(systemPrompt || this.strictSystemPrompt);
     const characterSection = this.formatCharacterIdentity(characterName, characterDescription);
     const exampleSection = this.formatExampleMessages(exampleMessages, characterName);
-    const responseInstruction = this.formatResponseInstruction(characterName);
 
     // Calculate base prompt tokens (everything except history)
-    const basePrompt = systemSection + characterSection + exampleSection + responseInstruction;
+    const basePrompt = systemSection + characterSection + exampleSection;
     const baseTokens = this.estimateTokenCount(basePrompt);
 
     // Calculate available tokens for conversation history
@@ -74,7 +73,7 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
       return '';
     }
 
-    let historySection = 'Recent conversation:\n';
+    let historySection = 'Conversation History:\n';
     let currentTokens = this.estimateTokenCount(historySection);
     let includedMessages = 0;
 
@@ -142,11 +141,6 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
     });
     
     return section + '\n';
-  }
-
-  formatResponseInstruction(characterName) {
-    const name = characterName || 'Assistant';
-    return `Respond as ${name} in plain text (no actions, no formatting, no character name prefix). Just the message content:\n`;
   }
 
   countMessagesInHistory(historySection) {

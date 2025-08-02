@@ -13,15 +13,15 @@ class SocketManager {
         methods: ["GET", "POST", "PUT", "DELETE"]
       }
     });
-    
+
     this.handlers = new SocketHandlers(this.io);
     this.eventManager = new SocketEventManager(this.io);
     this.queueMonitoring = new QueueMonitoringService(this.io);
     this.statsUpdater = new StatsUpdateService(this.io);
-    
+
     this.initialize();
-    
-    logger.info('Socket.IO manager initialized with modular services', { 
+
+    logger.info('Socket.IO manager initialized with modular services', {
       source: 'system',
       cors: 'http://localhost:5173',
       services: ['EventManager', 'QueueMonitoring', 'StatsUpdater', 'Handlers']
@@ -37,20 +37,20 @@ class SocketManager {
 
   setupSocketHandlers() {
     this.io.on('connection', async (socket) => {
-      logger.info('Client connected', { 
+      logger.info('Client connected', {
         source: 'system',
         socketId: socket.id,
         clientIP: socket.handshake.address,
         totalClients: this.io.engine.clientsCount
       });
-      
+
       try {
         // Send initial data
         await this.eventManager.sendInitialData(socket);
-        
+
         // Register all event handlers
         this.registerSocketEvents(socket);
-        
+
       } catch (error) {
         logger.error('Error initializing socket connection', {
           source: 'system',
@@ -60,7 +60,7 @@ class SocketManager {
       }
 
       socket.on('disconnect', (reason) => {
-        logger.info('Client disconnected', { 
+        logger.info('Client disconnected', {
           source: 'system',
           socketId: socket.id,
           reason: reason,
@@ -74,16 +74,16 @@ class SocketManager {
     // Bot connection events
     socket.on('toggleBotConnection', () => this.handlers.handleToggleBotConnection(socket));
     socket.on('getBotStatus', () => this.handlers.handleGetBotStatus(socket));
-    
+
     // Configuration events
     socket.on('updatePersona', (data) => this.handlers.handleUpdatePersona(socket, data));
     socket.on('updateSettings', (data) => this.handlers.handleUpdateSettings(socket, data));
-    
+
     // Discord server/channel events
     socket.on('getServers', () => this.handlers.handleGetServers(socket));
     socket.on('getChannels', (data) => this.handlers.handleGetChannels(socket, data));
     socket.on('updateActiveChannels', (data) => this.handlers.handleUpdateActiveChannels(socket, data));
-    
+
     // Log events
     socket.on('getLogs', (data) => this.handlers.handleGetLogs(socket, data));
     socket.on('clearLogs', () => this.handlers.handleClearLogs(socket));

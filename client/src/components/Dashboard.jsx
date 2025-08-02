@@ -70,7 +70,7 @@ function Dashboard({ stats, recentActivity, socketService }) {
         {/* Queue Monitor */}
         <QueueMonitor socketService={socketService} />
 
-        {/* System Logs */}
+        {/* System Logs - Now includes prompts as special log entries */}
         <LogViewer socketService={socketService} />
       </div>
     </div>

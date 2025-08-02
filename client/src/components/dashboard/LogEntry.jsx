@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { ChevronRight, ChevronDown, AlertTriangle, Info, CheckCircle, XCircle, Bug } from 'lucide-react';
+import { ChevronRight, ChevronDown, AlertTriangle, Info, CheckCircle, XCircle, Bug, MessageSquare, Copy } from 'lucide-react';
 
 function LogEntry({ log }) {
   const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
   
   const hasDetails = log.details && Object.keys(log.details).length > 0;
+  const isPromptLog = log.message?.includes('AI prompt generated') && log.details?.fullPrompt;
   
   const getLevelConfig = (level) => {
     const configs = {
@@ -44,7 +46,7 @@ function LogEntry({ log }) {
   };
   
   const config = getLevelConfig(log.level);
-  const Icon = config.icon;
+  const Icon = isPromptLog ? MessageSquare : config.icon;
   
   const formatTimestamp = (timestamp) => {
     const date = new Date(timestamp);
@@ -55,11 +57,82 @@ function LogEntry({ log }) {
       second: '2-digit'
     });
   };
+
+  const handleCopyPrompt = async () => {
+    if (!log.details?.fullPrompt) return;
+    
+    try {
+      await navigator.clipboard.writeText(log.details.fullPrompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.error('Failed to copy prompt:', error);
+    }
+  };
+
+  const formatTokens = (tokens) => {
+    if (!tokens) return '0';
+    return tokens.toLocaleString();
+  };
   
   const formatDetails = (details) => {
     if (!details || Object.keys(details).length === 0) return null;
     
+    // Special handling for prompt logs
+    if (isPromptLog) {
+      return (
+        <div className="space-y-4">
+          {/* Token Usage Info */}
+          {details.tokenUsage && (
+            <div className="bg-gray-800 bg-opacity-80 rounded p-3">
+              <h5 className="text-sm font-medium text-gray-200 mb-2">Token Usage</h5>
+              <div className="grid grid-cols-2 gap-4 text-xs text-gray-300">
+                <div>Total: <span className="text-white">{formatTokens(details.tokenUsage.totalTokens)}</span></div>
+                <div>Base: <span className="text-white">{formatTokens(details.tokenUsage.baseTokens)}</span></div>
+                <div>History: <span className="text-white">{formatTokens(details.tokenUsage.historyTokens)}</span></div>
+                <div>Messages: <span className="text-white">{details.tokenUsage.messagesIncluded || 0}</span></div>
+              </div>
+            </div>
+          )}
+
+          {/* Context Info */}
+          <div className="bg-gray-800 bg-opacity-80 rounded p-3">
+            <h5 className="text-sm font-medium text-gray-200 mb-2">Context</h5>
+            <div className="text-xs text-gray-300 space-y-1">
+              <div>Character: <span className="text-white">{details.character || 'Unknown'}</span></div>
+              <div>Channel: <span className="text-white">{details.channel || 'Unknown'}</span></div>
+              <div>Author: <span className="text-white">{details.author || 'Unknown'}</span></div>
+            </div>
+          </div>
+
+          {/* Full Prompt */}
+          {details.fullPrompt && (
+            <div className="bg-gray-900 rounded p-3">
+              <div className="flex items-center justify-between mb-2">
+                <h5 className="text-sm font-medium text-gray-200">Full Prompt</h5>
+                <button
+                  onClick={handleCopyPrompt}
+                  className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+                >
+                  <Copy className="h-3 w-3" />
+                  {copied ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+              <div className="max-h-64 overflow-y-auto">
+                <pre className="text-xs text-gray-300 whitespace-pre-wrap break-words">
+                  {details.fullPrompt}
+                </pre>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+    
+    // Regular details formatting
     return Object.entries(details).map(([key, value]) => {
+      if (key === 'fullPrompt') return null; // Skip fullPrompt in regular view
+      
       let displayValue = value;
       
       // Format different types nicely
@@ -74,11 +147,20 @@ function LogEntry({ log }) {
           <span className="text-gray-400">{key}:</span> {displayValue}
         </div>
       );
-    });
+    }).filter(Boolean);
   };
 
+  // Special styling for prompt logs
+  const promptBg = isPromptLog 
+    ? 'bg-cyan-600 bg-opacity-20 border-cyan-400 border-opacity-40' 
+    : config.bg;
+  const promptIconColor = isPromptLog ? 'text-cyan-300' : config.color;
+  const hoverBg = isPromptLog 
+    ? 'hover:bg-cyan-600 hover:bg-opacity-30' 
+    : 'hover:bg-gray-800 hover:bg-opacity-50';
+
   return (
-    <div className={`rounded border p-3 transition-colors hover:bg-gray-800 hover:bg-opacity-50 ${config.bg}`}>
+    <div className={`rounded border p-3 transition-colors ${hoverBg} ${promptBg}`}>
       {/* Main log entry with consistent grid layout */}
       <div 
         className={`grid grid-cols-[16px_16px_64px_60px_80px_1fr] gap-3 items-start ${hasDetails ? 'cursor-pointer' : ''}`}
@@ -97,7 +179,7 @@ function LogEntry({ log }) {
         
         {/* Level Icon - Fixed width */}
         <div className="w-4 h-4 mt-0.5 flex justify-center">
-          <Icon className={`h-4 w-4 ${config.color}`} />
+          <Icon className={`h-4 w-4 ${promptIconColor}`} />
         </div>
         
         {/* Timestamp - Fixed width */}
@@ -107,7 +189,7 @@ function LogEntry({ log }) {
         
         {/* Level Badge - Fixed width */}
         <div className={`text-xs px-2 py-0.5 rounded uppercase font-medium text-center ${config.badgeColor}`}>
-          {log.level}
+          {isPromptLog ? 'PROMPT' : log.level}
         </div>
         
         {/* Source Badge - Fixed width */}
@@ -118,14 +200,21 @@ function LogEntry({ log }) {
         {/* Message - Flexible width */}
         <div className="text-gray-100 break-words bg-gray-800 bg-opacity-40 px-3 py-1 rounded min-w-0">
           {log.message}
+          {isPromptLog && log.details?.promptLength && (
+            <span className="ml-2 text-xs text-purple-300">
+              ({log.details.promptLength.toLocaleString()} chars)
+            </span>
+          )}
         </div>
       </div>
       
       {/* Expanded Details */}
       {expanded && hasDetails && (
         <div className="mt-3 pl-8 border-l-2 border-gray-600">
-          <div className="text-xs text-gray-400 mb-2">Details:</div>
-          <div className="bg-gray-800 bg-opacity-80 rounded p-3 text-xs">
+          <div className="text-xs text-gray-400 mb-2">
+            {isPromptLog ? 'Prompt Details:' : 'Details:'}
+          </div>
+          <div className={isPromptLog ? '' : 'bg-gray-800 bg-opacity-80 rounded p-3 text-xs'}>
             {formatDetails(log.details)}
           </div>
         </div>

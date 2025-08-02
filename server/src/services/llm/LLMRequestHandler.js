@@ -31,7 +31,7 @@ class LLMRequestHandler {
     );
   }
 
-  async _handleCharacterGeneration(contextManager, responseManager, context) {
+async _handleCharacterGeneration(contextManager, responseManager, context) {
     try {
       logger.info('Processing character response generation', {
         source: 'llm',
@@ -47,6 +47,9 @@ class LLMRequestHandler {
       
       // Log prompt building results
       this._logPromptResults(tokenUsage, context.characterName);
+      
+      // NEW: Broadcast prompt data to frontend via socket
+      this._broadcastPromptData(prompt, tokenUsage, context);
       
       // Validate token limits before sending to LLM
       const validation = contextManager.validateTokenLimits(context);
@@ -83,6 +86,40 @@ class LLMRequestHandler {
       
     } catch (error) {
       return this._handleGenerationError(error, context.characterName);
+    }
+  }
+
+_broadcastPromptData(prompt, tokenUsage, context) {
+    try {
+      const promptData = {
+        prompt: prompt,
+        tokenUsage: tokenUsage,
+        character: context.characterName || 'Unknown',
+        timestamp: new Date().toISOString(),
+        channel: context.channel?.name || 'Unknown',
+        author: context.author?.username || 'Unknown'
+      };
+
+      // Store globally for socket requests
+      global.lastPromptData = promptData;
+      
+      // Emit directly using Node.js events to notify socket system
+      process.nextTick(() => {
+        process.emit('promptGenerated', promptData);
+      });
+      
+      logger.debug('Prompt data stored and event emitted', {
+        source: 'llm',
+        promptLength: prompt.length,
+        character: context.characterName,
+        totalTokens: tokenUsage.totalTokens
+      });
+      
+    } catch (error) {
+      logger.warn('Failed to broadcast prompt data', {
+        source: 'llm',
+        error: error.message
+      });
     }
   }
 
