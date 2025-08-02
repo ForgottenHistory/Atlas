@@ -51,8 +51,11 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
     // Build dynamic conversation history
     const historySection = this.buildDynamicHistory(conversationHistory, historyTokenBudget);
 
+    // Build "You are replying to" section
+    const replyToSection = this.buildReplyToSection(conversationHistory);
+
     // Assemble final prompt
-    const finalPrompt = basePrompt + historySection + `${characterName}: ` ;
+    const finalPrompt = basePrompt + historySection + replyToSection + `${characterName}: `;
 
     return {
       prompt: finalPrompt,
@@ -98,6 +101,21 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
     }
 
     return historySection;
+  }
+
+  buildReplyToSection(conversationHistory) {
+    if (!conversationHistory || conversationHistory.length === 0) {
+      return '';
+    }
+
+    // Get the most recent message (the one we're replying to)
+    const lastMessage = conversationHistory[conversationHistory.length - 1];
+    
+    if (!lastMessage) {
+      return '';
+    }
+
+    return `\n## You are replying to:\n${lastMessage.author || 'User'}: ${lastMessage.content || ''}\n\n`;
   }
 
   formatSystemPrompt(systemPrompt) {

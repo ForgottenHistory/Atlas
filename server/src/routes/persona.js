@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const storage = require('../utils/storage');
+const discordService = require('../services/discord');
 
 // GET /api/persona
 router.get('/', async (req, res) => {
@@ -28,7 +29,9 @@ router.post('/', async (req, res) => {
       creator_notes, 
       tags, 
       creator, 
-      character_version 
+      character_version,
+      updateAvatar,
+      avatarImage
     } = req.body;
     
     if (!name || !description) {
@@ -55,6 +58,31 @@ router.post('/', async (req, res) => {
         success: false,
         error: 'Failed to save persona'
       });
+    }
+
+    // Update bot avatar if requested and Discord bot is connected
+    if (updateAvatar && avatarImage) {
+      console.log('Avatar update requested:', { 
+        updateAvatar, 
+        hasAvatarImage: !!avatarImage,
+        discordReady: discordService.isReady(),
+        discordConnected: discordService.getStatus().isConnected
+      });
+      
+      if (discordService.isReady()) {
+        try {
+          console.log('Attempting to update bot avatar...');
+          await updateBotAvatar(avatarImage, name);
+          console.log('Bot avatar updated successfully');
+          await storage.addActivity(`Bot avatar updated for character: ${name}`);
+        } catch (avatarError) {
+          console.error('Failed to update bot avatar:', avatarError);
+          await storage.addActivity(`Persona updated but avatar update failed: ${avatarError.message}`);
+        }
+      } else {
+        console.log('Discord bot not ready, skipping avatar update');
+        await storage.addActivity(`Persona updated but bot not connected for avatar update`);
+      }
     }
     
     // Add activity log
@@ -118,5 +146,62 @@ router.put('/', async (req, res) => {
     });
   }
 });
+
+// Helper function to update bot avatar
+async function updateBotAvatar(imageDataUrl, characterName) {
+  try {
+    console.log('updateBotAvatar called with:', {
+      characterName,
+      imageDataLength: imageDataUrl?.length,
+      isDataUrl: imageDataUrl?.startsWith('data:')
+    });
+
+    // Access the internal Discord client through the service
+    const internalClient = discordService.client?.client || discordService.client?.getClient?.() || null;
+    console.log('Discord client status:', {
+      hasInternalClient: !!internalClient,
+      hasUser: !!(internalClient && internalClient.user),
+      clientReady: internalClient?.readyAt,
+      userTag: internalClient?.user?.tag,
+      serviceReady: discordService.isReady(),
+      serviceStatus: discordService.getStatus()
+    });
+
+    if (!internalClient || !internalClient.user) {
+      throw new Error('Discord client not ready');
+    }
+
+    // Convert data URL to buffer
+    console.log('Converting image data URL to buffer...');
+    const base64Data = imageDataUrl.split(',')[1];
+    if (!base64Data) {
+      throw new Error('Invalid image data URL format');
+    }
+    
+    const imageBuffer = Buffer.from(base64Data, 'base64');
+    console.log('Image buffer created:', {
+      bufferSize: imageBuffer.length,
+      bufferSizeKB: Math.round(imageBuffer.length / 1024)
+    });
+
+    // Discord has a file size limit of 8MB for avatars
+    if (imageBuffer.length > 8 * 1024 * 1024) {
+      throw new Error(`Image too large: ${Math.round(imageBuffer.length / 1024 / 1024)}MB (max 8MB)`);
+    }
+
+    // Update the bot's avatar
+    console.log('Calling Discord API to update avatar...');
+    await internalClient.user.setAvatar(imageBuffer);
+    
+    console.log(`Bot avatar updated successfully for character: ${characterName}`);
+  } catch (error) {
+    console.error('Failed to update bot avatar:', {
+      error: error.message,
+      stack: error.stack,
+      characterName
+    });
+    throw error;
+  }
+}
 
 module.exports = router;
