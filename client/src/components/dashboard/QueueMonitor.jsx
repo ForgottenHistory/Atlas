@@ -15,64 +15,45 @@ function QueueMonitor({ socketService }) {
   });
   const [lastUpdate, setLastUpdate] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [debugEvents, setDebugEvents] = useState([]);
-
-  const addDebugEvent = (event, data) => {
-    console.log(`QueueMonitor: ${event}`, data);
-    setDebugEvents(prev => [
-      { event, timestamp: new Date(), data: typeof data === 'object' ? JSON.stringify(data).slice(0, 100) : data },
-      ...prev.slice(0, 9) // Keep last 10 events
-    ]);
-  };
 
   useEffect(() => {
     if (!socketService) {
-      addDebugEvent('No socketService provided');
       return;
     }
 
-    addDebugEvent('Setting up socket listeners');
     setIsConnected(socketService.isConnected());
 
     // Listen for connection status
     const unsubscribeConnection = socketService.on('connection', (status) => {
       setIsConnected(status.connected);
-      addDebugEvent('Connection status changed', status.connected);
     });
 
     // Listen for initial bot status with queue data
     const unsubscribeBotStatus = socketService.on('botStatus', (data) => {
-      addDebugEvent('Received botStatus', `queueStats: ${!!data.queueStats}, queueHealth: ${!!data.queueHealth}`);
       
       if (data.queueStats) {
         setQueueStats(data.queueStats);
-        addDebugEvent('Updated queueStats from botStatus', data.queueStats);
       }
       if (data.queueHealth) {
         setQueueHealth(data.queueHealth);
-        addDebugEvent('Updated queueHealth from botStatus', data.queueHealth);
       }
       setLastUpdate(new Date());
     });
 
     // THIS IS THE KEY FIX - Listen for real-time queue updates
     const unsubscribeQueueUpdate = socketService.on('queueUpdate', (data) => {
-      addDebugEvent('Received queueUpdate', `queued: ${data.health?.totalQueued}, active: ${data.health?.activeGlobal}`);
       
       if (data.stats) {
         setQueueStats(data.stats);
-        addDebugEvent('Updated queueStats from queueUpdate', data.stats);
       }
       if (data.health) {
         setQueueHealth(data.health);
-        addDebugEvent('Updated queueHealth from queueUpdate', data.health);
       }
       setLastUpdate(new Date(data.timestamp));
     });
 
     // Listen for stats updates that include queue data
     const unsubscribeStatsUpdate = socketService.on('statsUpdate', (data) => {
-      addDebugEvent('Received statsUpdate', `hasQueueStats: ${!!data.queueStats}`);
       if (data.queueStats) {
         setQueueStats(data.queueStats);
         setLastUpdate(new Date());
@@ -81,7 +62,6 @@ function QueueMonitor({ socketService }) {
 
     // Listen for queue stats response
     const unsubscribeQueueStats = socketService.on('queueStats', (data) => {
-      addDebugEvent('Received queueStats', `stats: ${!!data.stats}, health: ${!!data.health}`);
       if (data.stats) setQueueStats(data.stats);
       if (data.health) setQueueHealth(data.health);
       setLastUpdate(new Date(data.timestamp));
@@ -89,7 +69,6 @@ function QueueMonitor({ socketService }) {
 
     // Also listen for queueStatsUpdated (from config changes)
     const unsubscribeQueueStatsUpdated = socketService.on('queueStatsUpdated', (data) => {
-      addDebugEvent('Received queueStatsUpdated', `stats: ${!!data.stats}, health: ${!!data.health}`);
       if (data.stats) setQueueStats(data.stats);
       if (data.health) setQueueHealth(data.health);
       setLastUpdate(new Date(data.timestamp));
@@ -97,7 +76,6 @@ function QueueMonitor({ socketService }) {
 
     // Request initial queue stats
     if (socketService.isConnected()) {
-      addDebugEvent('Requesting initial queue stats');
       socketService.sendToServer('getQueueStats');
     }
 
@@ -114,7 +92,6 @@ function QueueMonitor({ socketService }) {
   // Test function to manually request queue stats
   const refreshQueueStats = () => {
     if (socketService && socketService.isConnected()) {
-      addDebugEvent('Manual queue stats refresh');
       socketService.sendToServer('getQueueStats');
     }
   };
@@ -190,16 +167,6 @@ function QueueMonitor({ socketService }) {
       
       <Card.Content className="flex-1 overflow-y-auto">
         <div className="space-y-4">
-          {/* Debug Panel */}
-          <div className="bg-gray-900 bg-opacity-50 rounded p-2 text-xs">
-            <div className="text-gray-400 mb-1">Debug Events (last 5):</div>
-            {debugEvents.slice(0, 5).map((event, i) => (
-              <div key={i} className="text-gray-300 truncate">
-                {formatTimestamp(event.timestamp)}: {event.event} {event.data && `- ${event.data}`}
-              </div>
-            ))}
-          </div>
-
           {/* Global Stats */}
           <div className={`rounded-lg border p-4 ${healthStatus.bgColor}`}>
             <div className="flex items-center justify-between mb-3">
