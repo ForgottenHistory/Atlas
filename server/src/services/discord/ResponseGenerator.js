@@ -1,14 +1,16 @@
 const storage = require('../../utils/storage');
 const logger = require('../logger/Logger');
+const LLMServiceSingleton = require('../llm/LLMServiceSingleton');
 
 class ResponseGenerator {
-  constructor(llmService, conversationManager) {
-    this.llmService = llmService;
+  constructor(conversationManager) {
+    this.llmService = LLMServiceSingleton.getInstance(); // Use singleton
     this.conversationManager = conversationManager;
     
-    logger.info('ResponseGenerator initialized', { 
+    logger.info('ResponseGenerator initialized with singleton LLM service', { 
       source: 'discord',
-      features: ['AI response generation', 'conversation context', 'token management']
+      features: ['AI response generation', 'conversation context', 'token management'],
+      singleton: true
     });
   }
 
@@ -196,7 +198,8 @@ class ResponseGenerator {
         model: llmSettings.model || 'default',
         temperature: llmSettings.temperature || 0.6
       },
-      estimatedResponseTime: this.estimateResponseTime(memoryStats)
+      estimatedResponseTime: this.estimateResponseTime(memoryStats),
+      queueStats: this.llmService.getQueueStats()
     };
   }
 
@@ -256,6 +259,15 @@ class ResponseGenerator {
     }
     
     return recommendations;
+  }
+
+  // Get queue-specific statistics
+  getQueueStats() {
+    return this.llmService.getQueueStats();
+  }
+
+  getQueueHealth() {
+    return this.llmService.getQueueHealth();
   }
 }
 

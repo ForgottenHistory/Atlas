@@ -1,5 +1,4 @@
 const storage = require('../../utils/storage');
-const LLMService = require('../llm');
 const logger = require('../logger/Logger');
 const ConversationManager = require('./ConversationManager');
 const CommandHandler = require('./CommandHandler');
@@ -12,16 +11,16 @@ class MessageHandler {
     this.eventHandlers = new Map();
     
     // Initialize components
-    this.llmService = new LLMService();
     this.conversationManager = new ConversationManager();
     this.commandHandler = new CommandHandler(discordClient, this.conversationManager);
-    this.responseGenerator = new ResponseGenerator(this.llmService, this.conversationManager);
+    this.responseGenerator = new ResponseGenerator(this.conversationManager); // Pass conversationManager
     
     this.setupMessageListener();
     
-    logger.info('MessageHandler initialized', { 
+    logger.info('MessageHandler initialized with singleton LLM service', { 
       source: 'discord',
-      components: ['ConversationManager', 'CommandHandler', 'ResponseGenerator']
+      components: ['ConversationManager', 'CommandHandler', 'ResponseGenerator'],
+      singleton: true
     });
   }
 
@@ -99,6 +98,15 @@ class MessageHandler {
 
   getMemoryStats(channelId) {
     return this.conversationManager.getMemoryStats(channelId);
+  }
+
+  // Queue-related methods
+  getQueueStats() {
+    return this.responseGenerator.getQueueStats();
+  }
+
+  getQueueHealth() {
+    return this.responseGenerator.getQueueHealth();
   }
 
   // Event system

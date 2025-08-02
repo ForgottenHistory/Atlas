@@ -8,13 +8,16 @@ class RequestQueue {
     this.globalConcurrencyLimit = 1; // Global limit across all types
     this.activeGlobalRequests = 0;
     this.requestId = 0;
+    this.statsListeners = new Set(); // For real-time stats broadcasting
+    this.processingDelay = 100; // Small delay to make queue visible (ms)
     
     // Initialize default queue types
     this.initializeQueues();
     
     logger.info('RequestQueue initialized', { 
       source: 'llm',
-      globalLimit: this.globalConcurrencyLimit
+      globalLimit: this.globalConcurrencyLimit,
+      processingDelay: this.processingDelay
     });
   }
 
@@ -31,6 +34,29 @@ class RequestQueue {
       this.activeRequests.set(type, 0);
       this.concurrencyLimits.set(type, limit);
     }
+  }
+
+  // Add listener for real-time stats updates
+  addStatsListener(callback) {
+    this.statsListeners.add(callback);
+    return () => this.statsListeners.delete(callback);
+  }
+
+  // Broadcast stats to all listeners
+  broadcastStats() {
+    const stats = this.getQueueStats();
+    const health = this.isHealthy();
+    
+    this.statsListeners.forEach(callback => {
+      try {
+        callback({ stats, health });
+      } catch (error) {
+        logger.error('Error in stats listener', {
+          source: 'llm',
+          error: error.message
+        });
+      }
+    });
   }
 
   async enqueue(requestType, requestData, processor) {
@@ -65,6 +91,9 @@ class RequestQueue {
 
       this.queues.get(requestType).push(request);
       
+      // Broadcast updated stats immediately
+      this.broadcastStats();
+      
       // Try to process immediately
       this.processNext();
     });
@@ -98,6 +127,9 @@ class RequestQueue {
     this.activeRequests.set(type, (this.activeRequests.get(type) || 0) + 1);
     this.activeGlobalRequests++;
     
+    // Broadcast stats when request starts
+    this.broadcastStats();
+    
     const startTime = Date.now();
     
     logger.info('Request processing started', {
@@ -109,6 +141,11 @@ class RequestQueue {
     });
 
     try {
+      // Add a small delay to make queue activity visible
+      if (this.processingDelay > 0) {
+        await new Promise(resolve => setTimeout(resolve, this.processingDelay));
+      }
+      
       const result = await processor(data);
       
       const duration = Date.now() - startTime;
@@ -138,6 +175,9 @@ class RequestQueue {
       this.activeRequests.set(type, (this.activeRequests.get(type) || 1) - 1);
       this.activeGlobalRequests--;
       
+      // Broadcast stats when request completes
+      this.broadcastStats();
+      
       // Process next request
       this.processNext();
     }
@@ -153,6 +193,9 @@ class RequestQueue {
       newLimit: limit
     });
     
+    // Broadcast updated stats
+    this.broadcastStats();
+    
     // Try to process queued requests with new limit
     this.processNext();
   }
@@ -165,8 +208,21 @@ class RequestQueue {
       newLimit: limit
     });
     
+    // Broadcast updated stats
+    this.broadcastStats();
+    
     // Try to process queued requests with new limit
     this.processNext();
+  }
+
+  // Set processing delay for visibility
+  setProcessingDelay(delayMs) {
+    this.processingDelay = delayMs;
+    
+    logger.info('Processing delay updated', {
+      source: 'llm',
+      newDelay: delayMs
+    });
   }
 
   // Status methods

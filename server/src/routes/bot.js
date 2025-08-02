@@ -1,6 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const storage = require('../utils/storage');
+const LLMServiceSingleton = require('../services/llm/LLMServiceSingleton');
+
+// Initialize LLM service singleton for queue monitoring
+const llmService = LLMServiceSingleton.getInstance();
 
 // In-memory data that doesn't need persistence (real-time stats)
 let runtimeData = {
@@ -32,7 +36,9 @@ const getBotData = async () => {
     uptime: runtimeData.uptime,
     persona: storage.getPersona(),
     settings: storage.getSettings(),
-    recentActivity: storage.getRecentActivity()
+    recentActivity: storage.getRecentActivity(),
+    queueStats: llmService.getQueueStats(),
+    queueHealth: llmService.getQueueHealth()
   };
 };
 
@@ -47,7 +53,9 @@ router.get('/status', async (req, res) => {
         isConnected: data.isConnected,
         activeUsers: data.activeUsers,
         messagesToday: data.messagesToday,
-        uptime: data.uptime
+        uptime: data.uptime,
+        queueStats: data.queueStats,
+        queueHealth: data.queueHealth
       }
     });
   } catch (error) {
@@ -55,6 +63,60 @@ router.get('/status', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get bot status'
+    });
+  }
+});
+
+// GET /api/bot/queue
+router.get('/queue', async (req, res) => {
+  try {
+    const queueStats = llmService.getQueueStats();
+    const queueHealth = llmService.getQueueHealth();
+    
+    res.json({
+      success: true,
+      data: {
+        stats: queueStats,
+        health: queueHealth,
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Error getting queue stats:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get queue statistics'
+    });
+  }
+});
+
+// POST /api/bot/queue/config
+router.post('/queue/config', async (req, res) => {
+  try {
+    const { globalLimit, typeLimit, requestType } = req.body;
+    
+    if (globalLimit !== undefined) {
+      llmService.setGlobalConcurrencyLimit(globalLimit);
+      await storage.addActivity(`Queue global limit updated to ${globalLimit}`);
+    }
+    
+    if (typeLimit !== undefined && requestType) {
+      llmService.setQueueConcurrencyLimit(requestType, typeLimit);
+      await storage.addActivity(`Queue limit for ${requestType} updated to ${typeLimit}`);
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        stats: llmService.getQueueStats(),
+        message: 'Queue configuration updated'
+      }
+    });
+  } catch (error) {
+    console.error('Error updating queue config:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update queue configuration'
     });
   }
 });
