@@ -9,18 +9,18 @@ class ResponseContextBuilder {
 
     return {
       systemPrompt: llmSettings.systemPrompt || settings.systemPrompt,
-      characterName: persona.name,
-      characterDescription: persona.description,
-      exampleMessages: persona.mes_example,
+      characterName: persona.name || 'Bot', // FIX: Add fallback
+      characterDescription: persona.description || '', // FIX: Add fallback
+      exampleMessages: persona.mes_example || '', // FIX: Add fallback
       conversationHistory: conversationHistory,
       llmSettings: llmSettings,
       channel: {
         id: message.channel.id,
-        name: message.channel.name
+        name: message.channel.name || 'Unknown' // FIX: Add fallback
       },
       author: {
         id: message.author.id,
-        username: message.author.username
+        username: message.author.username || 'Unknown' // FIX: Add fallback
       }
     };
   }
@@ -33,9 +33,9 @@ class ResponseContextBuilder {
 
     return {
       systemPrompt: llmSettings.systemPrompt || settings.systemPrompt,
-      characterName: persona.name,
-      characterDescription: persona.description,
-      exampleMessages: persona.mes_example,
+      characterName: persona.name || 'Bot', // FIX: Add fallback
+      characterDescription: persona.description || '', // FIX: Add fallback
+      exampleMessages: persona.mes_example || '', // FIX: Add fallback
       conversationHistory: [],
       llmSettings: llmSettings,
       ...overrides

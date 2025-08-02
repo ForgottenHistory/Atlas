@@ -25,15 +25,48 @@ class ResponseGenerator {
 
   async generateAndSendResponse(message) {
     try {
+      // FIX: Add defensive checks for message structure
+      if (!message) {
+        logger.error('No message provided to generateAndSendResponse', { source: 'discord' });
+        return;
+      }
+
+      if (!message.channel) {
+        logger.error('Message has no channel', { 
+          source: 'discord',
+          messageId: message.id || 'unknown'
+        });
+        return;
+      }
+
+      if (!message.author) {
+        logger.error('Message has no author', { 
+          source: 'discord',
+          messageId: message.id || 'unknown',
+          channelId: message.channel.id || 'unknown'
+        });
+        return;
+      }
+
       logger.debug('Processing message for AI response', {
         source: 'discord',
-        author: message.author.username,
-        channel: message.channel.name,
-        contentLength: message.content.length
+        author: message.author.username || 'Unknown',
+        channel: message.channel.name || 'Unknown',
+        contentLength: message.content?.length || 0,
+        isBatchedMessage: !!message.originalMessages
       });
 
       // Build context for AI generation
       const context = this.contextBuilder.buildContext(message, this.conversationManager);
+      
+      // FIX: Add context validation
+      if (!context) {
+        logger.error('Failed to build context', {
+          source: 'discord',
+          author: message.author.username || 'Unknown'
+        });
+        return;
+      }
       
       // Validate context before processing
       const validation = this.validator.validateResponseContext(context);
@@ -41,7 +74,7 @@ class ResponseGenerator {
         logger.warn('Response context validation failed', {
           source: 'discord',
           issues: validation.issues,
-          channel: message.channel.name
+          channel: message.channel.name || 'Unknown'
         });
       }
       
@@ -59,8 +92,15 @@ class ResponseGenerator {
         source: 'llm',
         error: error.message,
         stack: error.stack,
-        channel: message.channel.name,
-        author: message.author.username
+        channel: message?.channel?.name || 'Unknown',
+        author: message?.author?.username || 'Unknown',
+        messageStructure: {
+          hasChannel: !!message?.channel,
+          hasAuthor: !!message?.author,
+          hasContent: !!message?.content,
+          isOriginalMessage: !message?.originalMessages,
+          isBatchedMessage: !!message?.originalMessages
+        }
       });
       
       return await this.processor.sendFallbackResponse(message);
