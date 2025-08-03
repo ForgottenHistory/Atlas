@@ -47,61 +47,36 @@ const VALIDATION_RULES = {
     max: 1,
     type: 'float',
     description: 'Min P must be between 0 and 1'
+  },
+  // Image reading validation rules
+  image_provider: {
+    type: 'string',
+    enum: ['', 'openrouter', 'anthropic', 'openai'],
+    description: 'Image provider must be openrouter, anthropic, openai, or empty'
+  },
+  image_model: {
+    type: 'string',
+    maxLength: 200,
+    description: 'Image model name must be under 200 characters'
+  },
+  image_api_key: {
+    type: 'string',
+    maxLength: 500,
+    description: 'Image API key must be under 500 characters'
+  },
+  image_max_size: {
+    min: 0.1,
+    max: 50,
+    type: 'float',
+    description: 'Image max size must be between 0.1 and 50 MB'
+  },
+  image_quality: {
+    min: 1,
+    max: 3,
+    type: 'integer',
+    description: 'Image quality must be 1, 2, or 3'
   }
 };
-
-/**
- * Validates a single LLM setting value
- * @param {string} key - Setting name
- * @param {any} value - Setting value
- * @returns {Object} - { isValid: boolean, error?: string, validatedValue?: any }
- */
-function validateSetting(key, value) {
-  const rule = VALIDATION_RULES[key];
-  if (!rule) {
-    return { isValid: false, error: `Unknown setting: ${key}` };
-  }
-
-  // Handle string type (system prompt)
-  if (rule.type === 'string') {
-    if (typeof value !== 'string') {
-      return { isValid: false, error: `${key} must be a string` };
-    }
-    
-    if (rule.maxLength && value.length > rule.maxLength) {
-      return { isValid: false, error: rule.description };
-    }
-    
-    return { isValid: true, validatedValue: value };
-  }
-
-  // Handle numeric types
-  let numValue;
-  if (rule.type === 'integer') {
-    numValue = parseInt(value);
-  } else {
-    numValue = parseFloat(value);
-  }
-
-  // Check if conversion was successful
-  if (isNaN(numValue)) {
-    return { isValid: false, error: `${key} must be a valid number` };
-  }
-
-  // Special handling for top_k (can be -1 or positive, but not 0)
-  if (key === 'top_k') {
-    if (numValue !== -1 && numValue <= 0) {
-      return { isValid: false, error: rule.description };
-    }
-  } else {
-    // Check range for other numeric settings
-    if (numValue < rule.min || numValue > rule.max) {
-      return { isValid: false, error: rule.description };
-    }
-  }
-
-  return { isValid: true, validatedValue: numValue };
-}
 
 /**
  * Validates LLM settings object
@@ -143,7 +118,9 @@ function validateLLMSettings(llmSettings) {
     min_p: { min: 0, max: 1, required: false },
     max_tokens: { min: 1, max: 8192, required: false, integer: true },
     max_characters: { min: 50, max: 4000, required: false, integer: true },
-    context_limit: { min: 512, max: 32768, required: false, integer: true }
+    context_limit: { min: 512, max: 32768, required: false, integer: true },
+    image_max_size: { min: 0.1, max: 50, required: false },
+    image_quality: { min: 1, max: 3, required: false, integer: true }
   };
   
   for (const [field, config] of Object.entries(numericFields)) {
@@ -170,6 +147,39 @@ function validateLLMSettings(llmSettings) {
       validatedSettings[field] = numValue;
     }
   }
+
+  // Validate image reading string settings
+  const imageStringFields = {
+    image_provider: { enum: ['', 'openrouter', 'anthropic', 'openai'] },
+    image_model: { maxLength: 200 },
+    image_api_key: { maxLength: 500 }
+  };
+
+  for (const [field, config] of Object.entries(imageStringFields)) {
+    if (llmSettings[field] !== undefined) {
+      const value = llmSettings[field];
+
+      if (typeof value !== 'string') {
+        errors.push(`${field} must be a string`);
+        continue;
+      }
+
+      if (config.enum && !config.enum.includes(value)) {
+        errors.push(`${field} must be one of: ${config.enum.join(', ')}`);
+        continue;
+      }
+
+      if (config.maxLength && value.length > config.maxLength) {
+        errors.push(`${field} must be under ${config.maxLength} characters`);
+        continue;
+      }
+
+      // Only store non-empty values
+      if (value.trim() !== '') {
+        validatedSettings[field] = value.trim();
+      }
+    }
+  }
   
   console.log('Validation results:', { 
     errors, 
@@ -183,10 +193,6 @@ function validateLLMSettings(llmSettings) {
   };
 }
 
-module.exports = {
-  validateLLMSettings
-};
-
 /**
  * Get default LLM settings
  * @returns {Object} - Default LLM settings
@@ -196,22 +202,17 @@ function getDefaultLLMSettings() {
     systemPrompt: '',
     temperature: 0.6,
     top_p: 1,
-    repetition_penalty: 1
+    repetition_penalty: 1,
+    image_provider: '',
+    image_model: '',
+    image_api_key: '',
+    image_max_size: 5,
+    image_quality: 2
   };
-}
-
-/**
- * Get validation rules for frontend
- * @returns {Object} - Validation rules object
- */
-function getValidationRules() {
-  return VALIDATION_RULES;
 }
 
 module.exports = {
   validateLLMSettings,
-  validateSetting,
   getDefaultLLMSettings,
-  getValidationRules,
   VALIDATION_RULES
 };
