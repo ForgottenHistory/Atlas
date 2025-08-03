@@ -7,6 +7,7 @@ const MessageFilter = require('./MessageFilter');
 const MessageBatcher = require('./MessageBatcher');
 const MultiLLMDecisionEngine = require('../llm/MultiLLMDecisionEngine');
 const ActionExecutor = require('./ActionExecutor');
+const imageProcessingService = require('../image_processing/ImageProcessingService');
 
 class MessageHandler {
   constructor(discordClient, channelManager) {
@@ -20,6 +21,7 @@ class MessageHandler {
     this.responseGenerator = new ResponseGenerator(this.conversationManager);
     this.messageFilter = new MessageFilter();
     this.messageBatcher = new MessageBatcher(3000); // 3 second timeout
+    this.imageProcessor = imageProcessingService;
     
     // NEW: Autonomous decision making
     this.decisionEngine = new MultiLLMDecisionEngine();
@@ -27,9 +29,9 @@ class MessageHandler {
     
     this.setupMessageListener();
     
-    logger.info('MessageHandler initialized with autonomous decision making', { 
+    logger.info('MessageHandler initialized with autonomous decision making and image processing', { 
       source: 'discord',
-      services: ['ConversationManager', 'CommandHandler', 'ResponseGenerator', 'MessageFilter', 'MessageBatcher', 'DecisionEngine', 'ActionExecutor']
+      services: ['ConversationManager', 'CommandHandler', 'ResponseGenerator', 'MessageFilter', 'MessageBatcher', 'DecisionEngine', 'ActionExecutor', 'ImageProcessingService']
     });
   }
 
@@ -65,130 +67,177 @@ class MessageHandler {
       const prefix = settings.commandPrefix || '!';
       
       if (message.content.startsWith(prefix)) {
-        // Delegate to command handler
-        await this.commandHandler.handleCommand(message, prefix);
+        return await this.commandHandler.handleCommand(message);
+      }
+
+      // NEW: Check for images in the message and process them BEFORE adding to history
+      const hasImages = this.messageFilter.messageHasImages(message);
+      if (hasImages) {
+        await this.processMessageImages(message);
+      }
+
+      // Filter and clean the message
+      const filterResult = this.messageFilter.filterMessage(message);
+      if (!filterResult.shouldProcess) {
+        logger.debug('Message filtered out', {
+          source: 'discord',
+          reason: filterResult.reason,
+          author: message.author.username
+        });
         return;
       }
 
-      // Delegate to filter service for content filtering
-      const filterResult = this.messageFilter.filterMessage(message);
-      if (!filterResult.shouldProcess) {
-        return; // Skip based on content filter (emotes, etc.)
+      // Add to conversation history (now with image analysis if present)
+      await this.conversationManager.addMessage(message);
+
+      // NEW: Use MultiLLM Decision Engine for autonomous decision making
+      try {
+        const decision = await this.decisionEngine.makeDecision({
+          message: filterResult.cleanedMessage,
+          channel: message.channel,
+          author: message.author,
+          conversationHistory: this.conversationManager.getHistory(message.channel.id, 10),
+          hasImages: hasImages
+        });
+
+        logger.info('Decision engine result', {
+          source: 'discord',
+          author: message.author.username,
+          channel: message.channel.name,
+          action: decision.action,
+          confidence: decision.confidence,
+          reasoning: decision.reasoning
+        });
+
+        // Execute the decided action
+        await this.actionExecutor.executeAction(decision, message);
+
+      } catch (decisionError) {
+        logger.error('Decision engine failed, falling back to legacy processing', {
+          source: 'discord',
+          error: decisionError.message,
+          author: message.author.username,
+          channel: message.channel.name
+        });
+
+        // Fallback to legacy batching system
+        await this.fallbackToLegacyProcessing(message);
       }
 
-      // Store in conversation history
-      this.conversationManager.addMessage(filterResult.cleanedMessage);
-
-      // NEW: Make autonomous decision instead of always responding
-      await this.makeAutonomousDecision(filterResult.cleanedMessage);
-      
     } catch (error) {
       logger.error('Error in message handler', {
         source: 'discord',
         error: error.message,
-        stack: error.stack,
+        author: message.author?.username || 'Unknown',
+        channel: message.channel?.name || 'Unknown'
+      });
+    }
+  }
+
+  async processMessageImages(message) {
+    try {
+      // Get image processing settings from LLM settings
+      const llmSettings = storage.getLLMSettings();
+      
+      logger.debug('Checking image processing settings', {
+        source: 'discord',
+        image_provider: llmSettings.image_provider,
+        hasApiKey: !!llmSettings.image_api_key,
+        hasModel: !!llmSettings.image_model,
+        messageId: message.id
+      });
+      
+      // Check if image processing is enabled
+      if (!llmSettings.image_provider || llmSettings.image_provider === '') {
+        logger.debug('Image processing disabled - no provider set', {
+          source: 'discord',
+          messageId: message.id,
+          author: message.author.username
+        });
+        return;
+      }
+
+      // Validate settings
+      if (!llmSettings.image_api_key || !llmSettings.image_model) {
+        logger.warn('Image processing enabled but missing API key or model', {
+          source: 'discord',
+          provider: llmSettings.image_provider,
+          hasApiKey: !!llmSettings.image_api_key,
+          hasModel: !!llmSettings.image_model
+        });
+        return;
+      }
+
+      logger.info('Processing images in message', {
+        source: 'discord',
         messageId: message.id,
         author: message.author.username,
-        channel: message.channel.name
-      });
-      
-      // Fallback to simple response on error
-      await message.reply('Sorry, something went wrong processing that message.').catch(() => {});
-    }
-  }
-
-  /**
-   * NEW: Autonomous decision making for each message
-   */
-  async makeAutonomousDecision(message) {
-    try {
-      // Build context for decision making
-      const channelContext = this.buildChannelContext(message);
-      
-      // Get decision from LLM
-      const decision = await this.decisionEngine.makeQuickDecision(message, channelContext);
-      
-      logger.info('Autonomous decision made', {
-        source: 'discord',
-        action: decision.action,
-        confidence: decision.confidence,
-        reasoning: decision.reasoning,
         channel: message.channel.name,
-        author: message.author.username,
-        messagePreview: message.content.substring(0, 50)
+        provider: llmSettings.image_provider,
+        model: llmSettings.image_model
       });
 
-      // Execute the decided action
-      const result = await this.actionExecutor.executeAction(decision, message);
+      // Process images using the image processing service
+      const imageSettings = {
+        provider: llmSettings.image_provider,
+        apiKey: llmSettings.image_api_key,
+        model: llmSettings.image_model,
+        quality: llmSettings.image_quality || 2,
+        maxSize: llmSettings.image_max_size || 5
+      };
+
+      const results = await this.imageProcessor.processMessageImages(message, imageSettings);
       
-      if (result.success) {
-        // Update decision engine timing
-        this.decisionEngine.updateLastActionTime();
+      if (results && results.length > 0) {
+        // Add image analysis to the message object for later use
+        message.imageAnalysis = results;
         
-        // Log successful action
-        logger.success('Autonomous action completed', {
+        logger.success('Image analysis completed', {
           source: 'discord',
-          actionType: result.actionType,
-          channel: message.channel.name
+          messageId: message.id,
+          imageCount: results.length,
+          provider: llmSettings.image_provider,
+          model: llmSettings.image_model
         });
+
+        // Store image analysis in conversation history
+        for (const result of results) {
+          await this.conversationManager.addImageAnalysis(message.channel.id, {
+            messageId: message.id,
+            author: message.author.username,
+            imageUrl: result.imageUrl,
+            filename: result.filename,
+            analysis: result.analysis,
+            provider: result.provider,
+            model: result.model,
+            timestamp: new Date()
+          });
+        }
       } else {
-        logger.warn('Autonomous action failed', {
+        logger.debug('No image analysis results returned', {
           source: 'discord',
-          error: result.error,
-          channel: message.channel.name
+          messageId: message.id
         });
       }
-      
+
     } catch (error) {
-      logger.error('Autonomous decision making failed', {
+      logger.error('Failed to process message images', {
         source: 'discord',
         error: error.message,
-        fallback: 'ignoring message',
-        channel: message.channel.name
+        messageId: message.id,
+        author: message.author.username
       });
+      // Don't fail the entire message processing if image analysis fails
     }
   }
 
-  /**
-   * Build context information for decision making
-   */
-  buildChannelContext(message) {
-    const memoryStats = this.conversationManager.getMemoryStats(message.channel.id);
-    const recentHistory = this.conversationManager.getHistory(message.channel.id);
-    
-    // Calculate activity level based on recent messages
-    const recentMessages = recentHistory.slice(-10); // Last 10 messages
-    const timeWindow = 5 * 60 * 1000; // 5 minutes
-    const now = new Date();
-    const recentActivity = recentMessages.filter(msg => 
-      (now - new Date(msg.timestamp)) < timeWindow
-    );
-    
-    let activityLevel = 'quiet';
-    if (recentActivity.length > 5) activityLevel = 'active';
-    else if (recentActivity.length > 2) activityLevel = 'normal';
-
-    return {
-      channelId: message.channel.id,
-      channelName: message.channel.name || 'Unknown',
-      serverId: message.guild?.id || 'DM',
-      serverName: message.guild?.name || 'Direct Message',
-      activityLevel: activityLevel,
-      recentMessageCount: recentActivity.length,
-      totalMessages: memoryStats.totalMessages,
-      lastAction: 'none', // TODO: Track last action per channel
-      canReact: this.actionExecutor.canActInChannel(message.channel),
-      conversationContext: recentMessages.slice(-3) // Last 3 messages for context
-    };
-  }
-
-  /**
-   * Legacy method for direct response (still used by batcher)
-   */
-  async processMessage(message) {
+  async fallbackToLegacyProcessing(message) {
     try {
-      // Generate response using existing system
-      await this.responseGenerator.generateAndSendResponse(message);
+      // Legacy batching logic with slight improvements
+      this.messageBatcher.addMessage(message, async (batchedMessages) => {
+        const mostRecentMessage = batchedMessages[batchedMessages.length - 1];
+        await this.responseGenerator.generateResponse(mostRecentMessage, batchedMessages);
+      });
     } catch (error) {
       logger.error('Error processing message via legacy path', {
         source: 'discord',
@@ -230,6 +279,11 @@ class MessageHandler {
       lastDecisionTime: this.decisionEngine.lastDecisionTime,
       timeSinceLastAction: this.decisionEngine.timeSinceLastAction()
     };
+  }
+
+  // NEW: Get image processing stats
+  getImageProcessingStats() {
+    return this.imageProcessor.getStats();
   }
 
   // Event system

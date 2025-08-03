@@ -82,7 +82,16 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
 
     // Add messages from most recent to oldest until we hit token limit
     for (const message of conversationHistory) {
-      const messageText = `${message.author || 'User'}: ${message.content || ''}\n`;
+      let messageText = `${message.author || 'User'}: ${message.content || ''}\n`;
+
+      // Add image analysis if present
+      if (message.imageAnalysis && Array.isArray(message.imageAnalysis)) {
+        const imageContext = message.imageAnalysis.map(analysis =>
+          `[Image: ${analysis.analysis.substring(0, 200)}...]`
+        ).join(' ');
+        messageText = `${message.author || 'User'}: ${message.content || ''} ${imageContext}\n`;
+      }
+
       const messageTokens = this.estimateTokenCount(messageText);
 
       // Check if adding this message would exceed our budget
@@ -110,7 +119,7 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
 
     // Get the most recent message (the one we're replying to)
     const lastMessage = conversationHistory[conversationHistory.length - 1];
-    
+
     if (!lastMessage) {
       return '';
     }
@@ -124,7 +133,7 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
 
   formatCharacterIdentity(name, description) {
     if (!name && !description) return '';
-    
+
     let section = '';
     if (name) {
       section += `Character: ${name}\n`;
@@ -137,13 +146,13 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
 
   formatExampleMessages(exampleMessages, characterName) {
     if (!exampleMessages || !exampleMessages.trim()) return '';
-    
+
     let section = 'Example messages:\n';
-    
+
     // Clean up examples to show the desired format
     const examples = exampleMessages.trim();
     const lines = examples.split('\n').filter(line => line.trim());
-    
+
     lines.forEach(line => {
       // Strip character names and actions from examples
       let cleaned = line.trim()
@@ -152,18 +161,18 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
         .replace(/\*[^*]*\*/g, '') // Remove *actions*
         .replace(/^["']|["']$/g, '') // Remove surrounding quotes
         .trim();
-      
+
       if (cleaned) {
         section += `Example: ${cleaned}\n`;
       }
     });
-    
+
     return section + '\n';
   }
 
   countMessagesInHistory(historySection) {
     if (!historySection) return 0;
-    
+
     // Count lines that look like "Author: message"
     const lines = historySection.split('\n').filter(line => line.includes(':') && line.trim() !== '');
     return Math.max(0, lines.length - 1); // Subtract 1 for the "Recent conversation:" header
@@ -172,20 +181,20 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
   // Enhanced token counting with better accuracy
   estimateTokenCount(text) {
     if (!text) return 0;
-    
+
     // More accurate token estimation
     // Remove extra whitespace and normalize
     const normalized = text.replace(/\s+/g, ' ').trim();
-    
+
     // Average tokens per character varies by language/content
     // For English: roughly 1 token per 3.5-4.5 characters
     // We'll use 4 as a conservative estimate
     const baseTokens = Math.ceil(normalized.length / 4);
-    
+
     // Add some tokens for punctuation and special characters
     const punctuationCount = (normalized.match(/[.,!?;:()[\]{}'"]/g) || []).length;
     const specialTokens = Math.ceil(punctuationCount * 0.2);
-    
+
     return baseTokens + specialTokens;
   }
 
@@ -193,7 +202,7 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
   validateTokenLimits(context) {
     const result = this.buildCharacterPrompt(context);
     const { totalTokens, contextLimit, availableTokens } = result.metadata;
-    
+
     return {
       isValid: totalTokens <= availableTokens,
       usage: {
@@ -209,21 +218,21 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
   getTokenRecommendations(metadata) {
     const recommendations = [];
     const { totalTokens, availableTokens, baseTokens, historyTokens } = metadata;
-    
+
     const usage = totalTokens / availableTokens;
-    
+
     if (usage > 0.9) {
       recommendations.push('Consider increasing context limit or reducing system prompt length');
     }
-    
+
     if (baseTokens > availableTokens * 0.5) {
       recommendations.push('System prompt and character description are using over 50% of available tokens');
     }
-    
+
     if (historyTokens < 100 && metadata.messagesIncluded < 3) {
       recommendations.push('Very limited conversation history due to token constraints');
     }
-    
+
     return recommendations;
   }
 }

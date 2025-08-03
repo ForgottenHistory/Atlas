@@ -6,15 +6,41 @@ class MultiLLMDecisionEngine {
     this.llmService = LLMServiceSingleton.getInstance();
     this.lastDecisionTime = new Date();
     
-    logger.info('Multi-LLM Decision Engine initialized', {
+    logger.info('Multi-LLM Decision Engine initialized with image awareness', {
       source: 'llm',
-      features: ['QuickDecision', 'FullResponse', 'BackgroundAnalysis']
+      features: ['QuickDecision', 'FullResponse', 'BackgroundAnalysis', 'ImageContext']
     });
   }
 
   /**
-   * Quick decision making (should use 34B model)
-   * Decides what action to take without generating full response
+   * Main decision making entry point - now handles both regular messages and images
+   */
+  async makeDecision(context) {
+    try {
+      // Enhanced context includes image information
+      const decision = await this.makeQuickDecision(context.message, {
+        channelName: context.channel.name,
+        serverName: context.channel.guild?.name || 'DM',
+        hasImages: context.hasImages || false,
+        imageAnalysis: context.message.imageAnalysis || null,
+        conversationHistory: context.conversationHistory || [],
+        lastAction: 'none', // Could be enhanced with actual last action tracking
+        activityLevel: 'normal' // Could be enhanced with actual activity analysis
+      });
+
+      return decision;
+    } catch (error) {
+      logger.error('Decision making failed', {
+        source: 'llm',
+        error: error.message,
+        messageId: context.message.id
+      });
+      return this.getDefaultDecision();
+    }
+  }
+
+  /**
+   * Quick decision making with image awareness
    */
   async makeQuickDecision(message, channelContext) {
     try {
@@ -23,7 +49,7 @@ class MultiLLMDecisionEngine {
       const result = await this.llmService.generateCustomResponse(prompt, {
         model: 'moonshotai/Kimi-K2-Instruct', // For now, we'll optimize this later
         temperature: 0.3,
-        max_tokens: 150,
+        max_tokens: 200, // Increased for image context
         top_p: 0.9
       });
 
@@ -72,6 +98,24 @@ class MultiLLMDecisionEngine {
   buildQuickDecisionPrompt(message, channelContext) {
     const persona = require('../../utils/storage').getPersona();
     
+    // Build image context if available
+    let imageContext = '';
+    if (channelContext.hasImages && message.imageAnalysis) {
+      const analyses = Array.isArray(message.imageAnalysis) ? message.imageAnalysis : [message.imageAnalysis];
+      imageContext = `\nIMAGES SHARED:\n${analyses.map((analysis, index) => 
+        `Image ${index + 1}: ${analysis.analysis.substring(0, 200)}...`
+      ).join('\n')}\n`;
+    }
+
+    // Build conversation context
+    let conversationContext = '';
+    if (channelContext.conversationHistory && channelContext.conversationHistory.length > 0) {
+      const recentMessages = channelContext.conversationHistory.slice(-3);
+      conversationContext = `\nRECENT CONVERSATION:\n${recentMessages.map(msg => 
+        `${msg.author}: ${msg.content.substring(0, 100)}${msg.content.length > 100 ? '...' : ''}`
+      ).join('\n')}\n`;
+    }
+
     return `You are ${persona.name || 'Atlas'}, a Discord bot with autonomous decision-making.
 
 Your personality: ${persona.description || 'A helpful, engaging bot'}
@@ -81,9 +125,11 @@ Current situation:
 - Recent activity level: ${channelContext.activityLevel || 'normal'}
 - Your last action: ${channelContext.lastAction || 'none'} (${this.timeSinceLastAction()} ago)
 
+${conversationContext}
 New message to analyze:
 Author: ${message.author.username}
 Content: "${message.content}"
+${imageContext}
 
 DECISION TIME: Choose ONE action and provide reasoning.
 
@@ -102,17 +148,23 @@ Guidelines:
 
 Consider:
 - Don't respond to every message (be selective like a human)
-- React to funny/interesting content
+- React to funny/interesting content or images
+- Images often warrant some kind of response or reaction
 - Change status based on mood/activity
-- Avoid being too chatty or annoying`;
+- Avoid being too chatty or annoying
+- If someone shares an image, consider acknowledging it`;
   }
 
   buildChannelAnalysisPrompt(recentMessages, channelInfo) {
     const persona = require('../../utils/storage').getPersona();
     
-    const messagesSummary = recentMessages.slice(0, 5).map(msg => 
-      `${msg.author}: ${msg.content.substring(0, 100)}`
-    ).join('\n');
+    const messagesSummary = recentMessages.slice(0, 5).map(msg => {
+      let summary = `${msg.author}: ${msg.content.substring(0, 100)}`;
+      if (msg.imageAnalysis) {
+        summary += ' [shared image]';
+      }
+      return summary;
+    }).join('\n');
 
     return `You are ${persona.name || 'Atlas'} analyzing channel activity for proactive engagement.
 
@@ -132,7 +184,8 @@ Consider:
 - Is there a natural conversation entry point?
 - Are people actively chatting?
 - Have you been quiet for a while?
-- Would your input add value?`;
+- Would your input add value?
+- Are there images that might spark conversation?`;
   }
 
   parseDecisionResponse(response) {
