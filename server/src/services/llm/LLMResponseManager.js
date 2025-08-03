@@ -1,9 +1,13 @@
-const ResponseFormatter = require('./ResponseFormatter');
+const ResponseProcessor = require('./response/ResponseProcessor');
+const ResponseAnalyzer = require('./response/ResponseAnalyzer');
+const ResponseValidator = require('./response/ResponseValidator');
 const logger = require('../logger/Logger');
 
 class LLMResponseManager {
   constructor() {
-    this.responseFormatter = new ResponseFormatter();
+    this.processor = new ResponseProcessor();
+    this.analyzer = new ResponseAnalyzer();
+    this.validator = new ResponseValidator();
   }
 
   processCharacterResponse(rawResponse, responseTime, context, tokenUsage) {
@@ -17,39 +21,39 @@ class LLMResponseManager {
         character: context.characterName
       });
       
-      // Format and clean the response with character limits
-      const originalLength = rawResponse.length;
-      const formattedResponse = this.responseFormatter.formatCharacterResponse(
+      // Process and format the response
+      const processedResponse = this.processor.processCharacterResponse(
         rawResponse, 
         context.characterName,
         maxCharacters
       );
       
-      // Get truncation information
-      const truncationInfo = this.responseFormatter.getTruncationInfo(
-        originalLength, 
-        formattedResponse.length, 
-        maxCharacters
-      );
-      
       // Validate the final response
-      const responseValidation = this.responseFormatter.validateResponse(formattedResponse, maxCharacters);
+      const validation = this.validator.validateResponse(processedResponse.response, maxCharacters);
+      
+      // Analyze response quality
+      const analysis = this.analyzer.analyzeResponse(processedResponse.response, {
+        originalLength: rawResponse.length,
+        tokenUsage: tokenUsage,
+        context: context
+      });
       
       // Log any issues
-      this._logResponseIssues(responseValidation, truncationInfo, context.characterName);
+      this.logResponseIssues(validation, processedResponse.truncationInfo, context.characterName);
       
       return {
         success: true,
-        response: formattedResponse,
+        response: processedResponse.response,
         metadata: {
           promptLength: context.prompt?.length || 0,
           originalResponse: rawResponse,
           responseTime: responseTime,
-          provider: 'current', // Will be filled by caller
-          validation: responseValidation,
+          provider: 'current',
+          validation: validation,
           tokenUsage: tokenUsage,
-          truncationInfo: truncationInfo,
+          truncationInfo: processedResponse.truncationInfo,
           characterLimit: maxCharacters,
+          analysis: analysis,
           queueProcessed: true
         }
       };
@@ -76,34 +80,33 @@ class LLMResponseManager {
         hasCharacterLimit: !!settings.max_characters
       });
 
-      // Apply character limits if specified
-      let finalResponse = rawResponse;
-      let truncationInfo = null;
-      
-      if (settings.max_characters) {
-        const originalLength = rawResponse.length;
-        finalResponse = this.responseFormatter.limitCharacters(rawResponse, settings.max_characters);
-        truncationInfo = this.responseFormatter.getTruncationInfo(
-          originalLength, 
-          finalResponse.length, 
-          settings.max_characters
-        );
-      }
+      // Process the response
+      const processedResponse = this.processor.processCustomResponse(
+        rawResponse,
+        settings.max_characters
+      );
       
       // Validate response
-      const validation = this.responseFormatter.validateResponse(
-        finalResponse, 
+      const validation = this.validator.validateResponse(
+        processedResponse.response, 
         settings.max_characters || 2000
       );
       
+      // Analyze response
+      const analysis = this.analyzer.analyzeResponse(processedResponse.response, {
+        originalLength: rawResponse.length,
+        settings: settings
+      });
+      
       return { 
         success: true, 
-        response: finalResponse,
+        response: processedResponse.response,
         metadata: {
           responseTime: responseTime,
-          truncationInfo: truncationInfo,
+          truncationInfo: processedResponse.truncationInfo,
           originalLength: rawResponse.length,
           validation: validation,
+          analysis: analysis,
           queueProcessed: true
         }
       };
@@ -120,18 +123,18 @@ class LLMResponseManager {
     }
   }
 
-  _logResponseIssues(responseValidation, truncationInfo, characterName) {
-    if (!responseValidation.isValid) {
+  logResponseIssues(validation, truncationInfo, characterName) {
+    if (!validation.isValid) {
       logger.warn('Response validation issues', {
         source: 'llm',
-        issues: responseValidation.issues,
-        responseLength: responseValidation.characterCount,
-        characterLimit: responseValidation.characterLimit,
+        issues: validation.issues,
+        responseLength: validation.characterCount,
+        characterLimit: validation.characterLimit,
         character: characterName
       });
     }
     
-    if (truncationInfo.wasTruncated) {
+    if (truncationInfo && truncationInfo.wasTruncated) {
       logger.warn('Response was truncated', {
         source: 'llm',
         originalLength: truncationInfo.originalLength,
@@ -143,135 +146,47 @@ class LLMResponseManager {
     }
   }
 
-  // Response analysis methods
+  // Public API methods - delegate to appropriate services
   analyzeResponse(response, metadata = {}) {
-    const analysis = {
-      length: response.length,
-      wordCount: this._countWords(response),
-      sentenceCount: this._countSentences(response),
-      qualityScore: this._calculateQualityScore(response, metadata),
-      issues: this._identifyIssues(response),
-      suggestions: this._generateSuggestions(response, metadata)
-    };
-    
-    return analysis;
+    return this.analyzer.analyzeResponse(response, metadata);
   }
 
-  _countWords(text) {
-    return text.trim().split(/\s+/).filter(word => word.length > 0).length;
-  }
-
-  _countSentences(text) {
-    return text.split(/[.!?]+/).filter(sentence => sentence.trim().length > 0).length;
-  }
-
-  _calculateQualityScore(response, metadata) {
-    let score = 100;
-    
-    // Length penalties
-    if (response.length < 20) score -= 30;
-    if (response.length > 1500) score -= 10;
-    
-    // Truncation penalty
-    if (metadata.truncationInfo?.wasTruncated) {
-      score -= metadata.truncationInfo.truncationPercentage * 0.5;
-    }
-    
-    // Formatting issues
-    if (response.includes('*')) score -= 15;
-    if (response.match(/^[A-Za-z\s]*:/)) score -= 20;
-    
-    // Bonus for good characteristics
-    const wordCount = this._countWords(response);
-    if (wordCount >= 10 && wordCount <= 200) score += 10;
-    
-    return Math.max(0, Math.min(100, Math.round(score)));
-  }
-
-  _identifyIssues(response) {
-    const issues = [];
-    
-    if (response.length < 10) {
-      issues.push('Response is very short');
-    }
-    
-    if (response.includes('*')) {
-      issues.push('Contains asterisk actions');
-    }
-    
-    if (response.match(/^[A-Za-z\s]*:/)) {
-      issues.push('Starts with character name prefix');
-    }
-    
-    if (response.includes('```')) {
-      issues.push('Contains code blocks');
-    }
-    
-    if (response.length > 2000) {
-      issues.push('Exceeds Discord character limit');
-    }
-    
-    return issues;
-  }
-
-  _generateSuggestions(response, metadata) {
-    const suggestions = [];
-    
-    if (response.length < 30) {
-      suggestions.push('Consider increasing response length for more engaging conversation');
-    }
-    
-    if (metadata.truncationInfo?.wasTruncated) {
-      suggestions.push('Reduce max_characters setting or increase context efficiency to avoid truncation');
-    }
-    
-    if (response.includes('*')) {
-      suggestions.push('Review system prompt to prevent action descriptions in responses');
-    }
-    
-    const wordCount = this._countWords(response);
-    if (wordCount > 300) {
-      suggestions.push('Response is very long - consider reducing max_characters for faster reading');
-    }
-    
-    return suggestions;
-  }
-
-  // Utility methods for external use
   validateResponse(response, maxCharacters) {
-    return this.responseFormatter.validateResponse(response, maxCharacters);
+    return this.validator.validateResponse(response, maxCharacters);
   }
 
   getTruncationInfo(originalLength, finalLength, maxCharacters) {
-    return this.responseFormatter.getTruncationInfo(originalLength, finalLength, maxCharacters);
+    return this.processor.getTruncationInfo(originalLength, finalLength, maxCharacters);
   }
 
   formatCharacterResponse(rawResponse, characterName, maxCharacters) {
-    return this.responseFormatter.formatCharacterResponse(rawResponse, characterName, maxCharacters);
+    const processed = this.processor.processCharacterResponse(rawResponse, characterName, maxCharacters);
+    return processed.response;
   }
 
   limitCharacters(text, maxCharacters) {
-    return this.responseFormatter.limitCharacters(text, maxCharacters);
+    return this.processor.limitCharacters(text, maxCharacters);
   }
 
-  // Response comparison and improvement
   compareResponses(responses) {
-    return responses.map(response => ({
-      response: response.text,
-      analysis: this.analyzeResponse(response.text, response.metadata),
-      ranking: this._rankResponse(response.text, response.metadata)
-    })).sort((a, b) => b.ranking - a.ranking);
+    return this.analyzer.compareResponses(responses);
   }
 
-  _rankResponse(response, metadata) {
-    const analysis = this.analyzeResponse(response, metadata);
-    let ranking = analysis.qualityScore;
+  generateResponseReport(response, metadata = {}) {
+    const analysis = this.analyzer.analyzeResponse(response, metadata);
+    const validation = this.validator.validateResponse(response, metadata.characterLimit);
     
-    // Adjust ranking based on specific criteria
-    ranking += Math.min(10, analysis.wordCount / 10); // Bonus for reasonable length
-    ranking -= analysis.issues.length * 5; // Penalty for issues
-    
-    return Math.max(0, Math.min(100, ranking));
+    return {
+      response: {
+        length: response.length,
+        wordCount: analysis.wordCount,
+        qualityScore: analysis.qualityScore
+      },
+      validation: validation,
+      analysis: analysis,
+      recommendations: analysis.suggestions,
+      generatedAt: new Date().toISOString()
+    };
   }
 }
 
