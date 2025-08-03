@@ -134,25 +134,32 @@ ${imageContext}
 DECISION TIME: Choose ONE action and provide reasoning.
 
 Respond in this EXACT format:
-ACTION: [respond|react|ignore|status_change]
+ACTION: [respond|reply|react|ignore|status_change]
 CONFIDENCE: [0.0-1.0]
 REASONING: [brief explanation]
 EMOJI: [only if ACTION is react, otherwise leave blank]
 STATUS: [only if ACTION is status_change: online|away|dnd|invisible]
 
 Guidelines:
-- respond: Generate a full conversational response
+- respond: Generate a full conversational response (normal send) - use for general chat, flowing conversation
+- reply: Generate a response using Discord's reply function (creates visual connection) - use for direct questions, specific references to previous messages, or when you need to emphasize you're responding to something specific
 - react: Add emoji reaction to their message  
 - ignore: Take no action, let conversation flow
 - status_change: Update your Discord status
 
 Consider:
 - Don't respond to every message (be selective like a human)
+- Use respond for most casual conversation and general chat
+- Use reply only when the message is clearly directed at you or references something specific
 - React to funny/interesting content or images
 - Images often warrant some kind of response or reaction
 - Change status based on mood/activity
 - Avoid being too chatty or annoying
-- If someone shares an image, consider acknowledging it`;
+- If someone shares an image, consider acknowledging it
+
+Context clues for reply vs respond:
+- Reply: Direct questions, "@mentions", specific references to your previous responses, corrections, formal requests
+- Respond: General conversation, flowing chat, observations, casual remarks, continuing discussion naturally`;
   }
 
   buildChannelAnalysisPrompt(recentMessages, channelInfo) {
@@ -202,7 +209,7 @@ Consider:
       for (const line of lines) {
         if (line.startsWith('ACTION:')) {
           const action = line.split(':')[1].trim().toLowerCase();
-          if (['respond', 'react', 'ignore', 'status_change'].includes(action)) {
+          if (['respond', 'reply', 'react', 'ignore', 'status_change'].includes(action)) {
             decision.action = action;
           }
         } else if (line.startsWith('CONFIDENCE:')) {

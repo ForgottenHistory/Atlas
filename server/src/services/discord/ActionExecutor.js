@@ -13,7 +13,7 @@ class ActionExecutor {
     });
   }
 
-  async executeAction(decision, message) {
+async executeAction(decision, message) {
     try {
       logger.info('Executing bot action', {
         source: 'discord',
@@ -27,6 +27,9 @@ class ActionExecutor {
       switch (decision.action) {
         case 'respond':
           return await this.executeRespond(message);
+          
+        case 'reply':
+          return await this.executeReply(message);
           
         case 'react':
           return await this.executeReact(message, decision.emoji);
@@ -60,18 +63,63 @@ class ActionExecutor {
       // Add realistic typing delay
       await this.simulateTyping(message.channel);
       
-      // Generate full response using existing system
-      const result = await this.responseGenerator.generateAndSendResponse(message);
+      // Generate full response using existing system (normal send)
+      const result = await this.responseGenerator.generateResponse(message);
       
-      logger.success('Response action completed', {
-        source: 'discord',
-        channel: message.channel.name,
-        responseLength: result?.response?.length || 0
-      });
-      
-      return { success: true, actionType: 'respond', result };
+      if (result.success) {
+        // Use normal channel.send instead of reply
+        const response = await message.channel.send(result.response);
+        
+        // Add bot response to conversation history
+        this.conversationManager.addMessage(response, true);
+        
+        logger.success('Response action completed (normal send)', {
+          source: 'discord',
+          channel: message.channel.name,
+          responseLength: result.response.length
+        });
+        
+        return { success: true, actionType: 'respond', result };
+      } else {
+        throw new Error(result.error || 'Response generation failed');
+      }
     } catch (error) {
       logger.error('Response action failed', {
+        source: 'discord',
+        error: error.message,
+        channel: message.channel.name
+      });
+      return { success: false, error: error.message };
+    }
+  }
+
+  async executeReply(message) {
+    try {
+      // Add realistic typing delay
+      await this.simulateTyping(message.channel);
+      
+      // Generate full response using existing system (Discord reply)
+      const result = await this.responseGenerator.generateResponse(message);
+      
+      if (result.success) {
+        // Use Discord's reply function to create visual connection
+        const response = await message.reply(result.response);
+        
+        // Add bot response to conversation history
+        this.conversationManager.addMessage(response, true);
+        
+        logger.success('Reply action completed (Discord reply)', {
+          source: 'discord',
+          channel: message.channel.name,
+          responseLength: result.response.length
+        });
+        
+        return { success: true, actionType: 'reply', result };
+      } else {
+        throw new Error(result.error || 'Response generation failed');
+      }
+    } catch (error) {
+      logger.error('Reply action failed', {
         source: 'discord',
         error: error.message,
         channel: message.channel.name

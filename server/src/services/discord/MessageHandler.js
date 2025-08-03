@@ -286,7 +286,7 @@ class MessageHandler {
     return this.imageProcessor.getStats();
   }
 
-  // Event system
+  // Event system methods
   on(event, callback) {
     if (!this.eventHandlers.has(event)) {
       this.eventHandlers.set(event, []);
