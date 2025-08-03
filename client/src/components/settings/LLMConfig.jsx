@@ -5,6 +5,7 @@ import ModelSelector from './llm/ModelSelector';
 import TokenManagement from './llm/TokenManagement';
 import SystemPromptConfig from './llm/SystemPromptConfig';
 import ModelParameters from './llm/ModelParameters';
+import ImageReadingConfig from './llm/ImageReadingConfig';
 
 const LLMConfig = ({ onUpdateSettings, isSubmitting }) => {
   const [formData, setFormData] = useState({
@@ -18,7 +19,13 @@ const LLMConfig = ({ onUpdateSettings, isSubmitting }) => {
     repetition_penalty: '1',
     min_p: '',
     max_characters: '2000',
-    context_limit: '4096'
+    context_limit: '4096',
+    // Image reading settings
+    image_provider: '',
+    image_model: '',
+    image_api_key: '',
+    image_max_size: '5',
+    image_quality: '2'
   });
 
   useEffect(() => {
@@ -43,7 +50,13 @@ const LLMConfig = ({ onUpdateSettings, isSubmitting }) => {
           repetition_penalty: llmSettings.repetition_penalty?.toString() || '1',
           min_p: llmSettings.min_p?.toString() || '',
           max_characters: llmSettings.max_characters?.toString() || '2000',
-          context_limit: llmSettings.context_limit?.toString() || '4096'
+          context_limit: llmSettings.context_limit?.toString() || '4096',
+          // Image reading settings
+          image_provider: llmSettings.image_provider || '',
+          image_model: llmSettings.image_model || '',
+          image_api_key: llmSettings.image_api_key || '',
+          image_max_size: llmSettings.image_max_size?.toString() || '5',
+          image_quality: llmSettings.image_quality?.toString() || '2'
         });
       }
     } catch (error) {
@@ -72,13 +85,26 @@ const LLMConfig = ({ onUpdateSettings, isSubmitting }) => {
     
     // Handle numeric parameters
     Object.entries(formData).forEach(([key, value]) => {
-      if (key !== 'systemPrompt' && key !== 'model' && value.trim() !== '') {
+      if (!['systemPrompt', 'model', 'image_provider', 'image_model', 'image_api_key'].includes(key) && value.trim() !== '') {
         const numValue = parseFloat(value);
         if (!isNaN(numValue)) {
           llmSettings[key] = numValue;
         }
       }
     });
+
+    // Handle image reading string settings
+    if (formData.image_provider && formData.image_provider.trim() !== '') {
+      llmSettings.image_provider = formData.image_provider.trim();
+    }
+    
+    if (formData.image_model && formData.image_model.trim() !== '') {
+      llmSettings.image_model = formData.image_model.trim();
+    }
+    
+    if (formData.image_api_key && formData.image_api_key.trim() !== '') {
+      llmSettings.image_api_key = formData.image_api_key.trim();
+    }
 
     await onUpdateSettings({ llm: llmSettings });
   };
@@ -95,7 +121,13 @@ const LLMConfig = ({ onUpdateSettings, isSubmitting }) => {
       repetition_penalty: '1',
       min_p: '',
       max_characters: '2000',
-      context_limit: '4096'
+      context_limit: '4096',
+      // Reset image settings
+      image_provider: '',
+      image_model: '',
+      image_api_key: '',
+      image_max_size: '5',
+      image_quality: '2'
     });
   };
 
@@ -142,6 +174,13 @@ const LLMConfig = ({ onUpdateSettings, isSubmitting }) => {
 
           {/* Model Parameters */}
           <ModelParameters
+            formData={formData}
+            onInputChange={handleInputChange}
+            isSubmitting={isSubmitting}
+          />
+
+          {/* Image Reading Configuration */}
+          <ImageReadingConfig
             formData={formData}
             onInputChange={handleInputChange}
             isSubmitting={isSubmitting}
