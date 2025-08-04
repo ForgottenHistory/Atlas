@@ -2,7 +2,7 @@ const DecisionMaker = require('./decision/DecisionMaker');
 const ContextAnalyzer = require('./decision/ContextAnalyzer');
 const DecisionParser = require('./decision/DecisionParser');
 const DecisionTracker = require('./decision/DecisionTracker');
-const ConversationHistoryLoader = require('../discord/conversation/ConversationHistoryLoader'); // Move this to top
+const ConversationHistoryLoader = require('../discord/conversation/ConversationHistoryLoader');
 const logger = require('../logger/Logger');
 
 class MultiLLMDecisionEngine {
@@ -61,7 +61,7 @@ class MultiLLMDecisionEngine {
    */
   async ensureConversationHistory(context) {
     try {
-      const { conversationHistory = [], conversationManager } = context;
+      const { conversationHistory = [], conversationManager, messageFilter } = context;
       const channelId = context.message.channel.id;
 
       // If we have sufficient recent history, no need to load
@@ -76,7 +76,12 @@ class MultiLLMDecisionEngine {
           context.message.client : 
           context.message.client;
         
-        this.historyLoader = new ConversationHistoryLoader(discordClient);
+        this.historyLoader = new ConversationHistoryLoader(discordClient, messageFilter);
+      }
+
+      // Make sure the message filter is set (it might be passed in context)
+      if (messageFilter && !this.historyLoader.messageFilter) {
+        this.historyLoader.setMessageFilter(messageFilter);
       }
 
       // Check if we should load history
@@ -87,7 +92,8 @@ class MultiLLMDecisionEngine {
           source: 'llm',
           channelId: channelId,
           channelName: context.message.channel.name,
-          currentHistoryLength: conversationHistory.length
+          currentHistoryLength: conversationHistory.length,
+          hasMessageFilter: !!this.historyLoader.messageFilter
         });
 
         const loaded = await this.historyLoader.loadRecentHistory(channelId, conversationManager);
@@ -108,7 +114,7 @@ class MultiLLMDecisionEngine {
       logger.error('Failed to ensure conversation history', {
         source: 'llm',
         error: error.message,
-        stack: error.stack, // Add stack trace for better debugging
+        stack: error.stack,
         channelId: context.message?.channel?.id
       });
       // Don't fail the decision process if history loading fails

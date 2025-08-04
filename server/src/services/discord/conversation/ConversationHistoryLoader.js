@@ -1,10 +1,15 @@
 const logger = require('../../logger/Logger');
 
 class ConversationHistoryLoader {
-  constructor(discordClient) {
+  constructor(discordClient, messageFilter = null) {
     this.discordClient = discordClient;
+    this.messageFilter = messageFilter;
     this.maxAgeHours = 2; // Don't load messages older than 2 hours
     this.maxMessages = 50; // Maximum messages to load per channel
+  }
+
+  setMessageFilter(messageFilter) {
+    this.messageFilter = messageFilter;
   }
 
   async loadRecentHistory(channelId, conversationManager) {
@@ -36,7 +41,8 @@ class ConversationHistoryLoader {
         channelId: channelId,
         channelName: channel.name,
         maxAgeHours: this.maxAgeHours,
-        maxMessages: this.maxMessages
+        maxMessages: this.maxMessages,
+        hasMessageFilter: !!this.messageFilter
       });
 
       // Calculate cutoff time
@@ -70,7 +76,37 @@ class ConversationHistoryLoader {
 
       // Add messages to conversation manager
       for (const message of messagesToLoad) {
-        conversationManager.addMessage(message, false);
+        // Process message through filter if available (for embed processing)
+        let processedMessage = message;
+        
+        if (this.messageFilter) {
+          try {
+            const filterResult = this.messageFilter.filterMessage(message);
+            if (filterResult.shouldProcess && filterResult.cleanedMessage) {
+              processedMessage = filterResult.cleanedMessage;
+              
+              if (filterResult.hasEmbeds) {
+                logger.debug('Processed embed content in historical message', {
+                  source: 'discord',
+                  messageId: message.id,
+                  author: message.author.username,
+                  embedCount: filterResult.embedInfo?.count || 0,
+                  originalLength: message.content?.length || 0,
+                  processedLength: processedMessage.content?.length || 0
+                });
+              }
+            }
+          } catch (filterError) {
+            logger.warn('Failed to filter historical message, using original', {
+              source: 'discord',
+              messageId: message.id,
+              error: filterError.message
+            });
+            // Use original message if filtering fails
+          }
+        }
+
+        conversationManager.addMessage(processedMessage, false);
         loadedCount++;
       }
 

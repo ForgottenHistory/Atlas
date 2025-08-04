@@ -102,7 +102,8 @@ class MessageProcessor {
         channel: message.channel,
         author: message.author,
         conversationHistory: this.conversationManager.getHistory(message.channel.id, 10),
-        conversationManager: this.conversationManager, // Add the conversation manager
+        conversationManager: this.conversationManager,
+        messageFilter: this.messageFilter,
         hasImages: hasImages,
         hasEmbeds: filterResult.hasEmbeds || false,
         embedCount: filterResult.embedInfo?.count || 0,
