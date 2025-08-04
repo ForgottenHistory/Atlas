@@ -9,18 +9,26 @@ class ResponseContextBuilder {
 
     return {
       systemPrompt: llmSettings.systemPrompt || settings.systemPrompt,
-      characterName: persona.name || 'Bot', // FIX: Add fallback
-      characterDescription: persona.description || '', // FIX: Add fallback
-      exampleMessages: persona.mes_example || '', // FIX: Add fallback
+      characterName: persona.name || 'Bot',
+      characterDescription: persona.description || '',
+      exampleMessages: persona.mes_example || '',
       conversationHistory: conversationHistory,
       llmSettings: llmSettings,
+      // FIXED: Pass the actual current message being responded to
+      currentMessage: {
+        content: message.content,
+        author: {
+          username: message.author?.username || 'Unknown'
+        },
+        imageAnalysis: message.imageAnalysis || null
+      },
       channel: {
         id: message.channel.id,
-        name: message.channel.name || 'Unknown' // FIX: Add fallback
+        name: message.channel.name || 'Unknown'
       },
       author: {
         id: message.author.id,
-        username: message.author.username || 'Unknown' // FIX: Add fallback
+        username: message.author.username || 'Unknown'
       }
     };
   }

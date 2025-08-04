@@ -10,27 +10,25 @@ class ResponseAction {
     this.typingSimulator = new TypingSimulator();
   }
 
-  async executeRespond(message) {
+  async executeRespond(message, decision = null) {
     try {
       // Add realistic typing delay
       await this.typingSimulator.simulateTyping(message.channel);
-      
+
       // Generate full response using existing system (normal send)
       const result = await this.responseGenerator.generateResponse(message);
-      
+
       if (result.success) {
-        // Use normal channel.send instead of reply
-        const response = await message.channel.send(result.response);
-        
-        // Add bot response to conversation history
-        this.conversationManager.addMessage(response, true);
-        
+        // FIXED: Pass decision context to ensure correct send vs reply behavior
+        const fakeDecision = { action: 'respond' }; // Force normal send
+        const response = await this.sendResponseWithDecision(message, result, fakeDecision);
+
         logger.success('Response action completed (normal send)', {
           source: 'discord',
           channel: message.channel.name,
           responseLength: result.response.length
         });
-        
+
         return { success: true, actionType: 'respond', result };
       } else {
         throw new Error(result.error || 'Response generation failed');
@@ -45,27 +43,25 @@ class ResponseAction {
     }
   }
 
-  async executeReply(message) {
+  async executeReply(message, decision = null) {
     try {
       // Add realistic typing delay
       await this.typingSimulator.simulateTyping(message.channel);
-      
+
       // Generate full response using existing system (Discord reply)
       const result = await this.responseGenerator.generateResponse(message);
-      
+
       if (result.success) {
-        // Use Discord's reply function to create visual connection
-        const response = await message.reply(result.response);
-        
-        // Add bot response to conversation history
-        this.conversationManager.addMessage(response, true);
-        
+        // FIXED: Pass decision context to ensure correct send vs reply behavior
+        const fakeDecision = { action: 'reply' }; // Force Discord reply
+        const response = await this.sendResponseWithDecision(message, result, fakeDecision);
+
         logger.success('Reply action completed (Discord reply)', {
           source: 'discord',
           channel: message.channel.name,
           responseLength: result.response.length
         });
-        
+
         return { success: true, actionType: 'reply', result };
       } else {
         throw new Error(result.error || 'Response generation failed');
@@ -77,6 +73,19 @@ class ResponseAction {
         channel: message.channel.name
       });
       return { success: false, error: error.message };
+    }
+  }
+
+  async sendResponseWithDecision(message, result, decision) {
+    // Use normal channel.send for 'respond', Discord reply for 'reply'
+    if (decision.action === 'reply') {
+      const response = await message.reply(result.response);
+      this.conversationManager.addMessage(response, true);
+      return response;
+    } else {
+      const response = await message.channel.send(result.response);
+      this.conversationManager.addMessage(response, true);
+      return response;
     }
   }
 }

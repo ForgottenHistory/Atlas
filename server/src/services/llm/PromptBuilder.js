@@ -21,6 +21,7 @@ class PromptBuilder {
 IMPORTANT: Your response should be ONLY the dialogue/message content. No actions, no formatting, no character names. Just speak naturally.`;
   }
 
+
   buildCharacterPrompt(context) {
     const {
       systemPrompt,
@@ -28,7 +29,8 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
       characterDescription,
       exampleMessages,
       conversationHistory = [],
-      llmSettings = {}
+      llmSettings = {},
+      currentMessage  // NEW: The actual message being responded to
     } = context;
 
     // Get token limits
@@ -51,8 +53,8 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
     // Build dynamic conversation history
     const historySection = this.buildDynamicHistory(conversationHistory, historyTokenBudget);
 
-    // Build "You are replying to" section
-    const replyToSection = this.buildReplyToSection(conversationHistory);
+    // Build "You are replying to" section with the ACTUAL current message
+    const replyToSection = this.buildReplyToSection(currentMessage, conversationHistory);
 
     // Assemble final prompt
     const finalPrompt = basePrompt + historySection + replyToSection + `${characterName}: `;
@@ -112,19 +114,34 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
     return historySection;
   }
 
-  buildReplyToSection(conversationHistory) {
-    if (!conversationHistory || conversationHistory.length === 0) {
-      return '';
+  buildReplyToSection(currentMessage, conversationHistory) {
+    // FIXED: Use the actual current message being responded to
+    // instead of guessing from conversation history
+
+    if (!currentMessage) {
+      // Fallback to old behavior if currentMessage not provided
+      if (!conversationHistory || conversationHistory.length === 0) {
+        return '';
+      }
+      const lastMessage = conversationHistory[conversationHistory.length - 1];
+      if (!lastMessage) {
+        return '';
+      }
+      return `\n## You are replying to:\n${lastMessage.author || 'User'}: ${lastMessage.content || ''}\n\n`;
     }
 
-    // Get the most recent message (the one we're replying to)
-    const lastMessage = conversationHistory[conversationHistory.length - 1];
+    // Use the actual current message that triggered this response
+    let messageContent = currentMessage.content || '';
 
-    if (!lastMessage) {
-      return '';
+    // Add image context if present
+    if (currentMessage.imageAnalysis && Array.isArray(currentMessage.imageAnalysis)) {
+      const imageContext = currentMessage.imageAnalysis.map(analysis =>
+        `[Image: ${analysis.analysis.substring(0, 100)}...]`
+      ).join(' ');
+      messageContent = `${messageContent} ${imageContext}`.trim();
     }
 
-    return `\n## You are replying to:\n${lastMessage.author || 'User'}: ${lastMessage.content || ''}\n\n`;
+    return `\n## You are replying to:\n${currentMessage.author?.username || 'User'}: ${messageContent}\n\n`;
   }
 
   formatSystemPrompt(systemPrompt) {
