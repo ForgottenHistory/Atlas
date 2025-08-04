@@ -4,7 +4,7 @@ class ConversationHistoryLoader {
   constructor(discordClient, messageFilter = null) {
     this.discordClient = discordClient;
     this.messageFilter = messageFilter;
-    this.maxAgeHours = 2; // Don't load messages older than 2 hours
+    this.maxAgeHours = 10; // Don't load messages older than 2 hours
     this.maxMessages = 50; // Maximum messages to load per channel
   }
 
@@ -155,7 +155,7 @@ class ConversationHistoryLoader {
       });
       
       // If we have no history at all, we should load
-      if (existingHistory.length <= 1) {
+      if (existingHistory.length <= 2) {
         logger.info('No existing history found, will load recent messages', {
           source: 'discord',
           channelId: channelId
