@@ -38,8 +38,25 @@ class MessageProcessor {
     const settings = storage.getSettings();
     const prefix = settings.commandPrefix || '!';
 
-    if (message.content.startsWith(prefix)) {
-      return await this.commandHandler.handleCommand(message);
+    logger.debug('Checking for command', {
+      source: 'discord',
+      content: message.content,
+      prefix: prefix,
+      startsWithPrefix: message.content ? message.content.startsWith(prefix) : false,
+      author: message.author.username
+    });
+
+    if (message.content && message.content.startsWith(prefix)) {
+      logger.info('Command detected, routing to command handler', {
+        source: 'discord',
+        content: message.content,
+        prefix: prefix, // Make sure we log the prefix
+        author: message.author.username,
+        channel: message.channel.name
+      });
+
+      // FIXED: Make sure we pass the prefix parameter
+      return await this.commandHandler.handleCommand(message, prefix);
     }
 
     // Check for images in the message and process them BEFORE adding to history
