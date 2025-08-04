@@ -34,69 +34,50 @@ class MessageProcessor {
       return; // Skip processing based on filter decision
     }
 
-    // Check if it's a command
+    // Check if it's a command first (commands bypass batching)
     const settings = storage.getSettings();
     const prefix = settings.commandPrefix || '!';
 
-    logger.debug('Checking for command', {
-      source: 'discord',
-      content: message.content,
-      prefix: prefix,
-      startsWithPrefix: message.content ? message.content.startsWith(prefix) : false,
-      author: message.author.username
-    });
-
     if (message.content && message.content.startsWith(prefix)) {
-      logger.info('Command detected, routing to command handler', {
-        source: 'discord',
-        content: message.content,
-        prefix: prefix, // Make sure we log the prefix
-        author: message.author.username,
-        channel: message.channel.name
-      });
-
-      // FIXED: Make sure we pass the prefix parameter
-      return await this.commandHandler.handleCommand(message, prefix);
+      const commandResult = await this.commandHandler.handleCommand(message);
+      if (commandResult.handled) {
+        logger.info('Command processed successfully', {
+          source: 'discord',
+          command: commandResult.command,
+          author: message.author.username,
+          channel: message.channel.name
+        });
+        return;
+      }
     }
 
-    // Check for images in the message and process them BEFORE adding to history
-    const hasImages = this.messageFilter.messageHasImages(message);
-    if (hasImages) {
-      await this.processMessageImages(message);
-    }
+    // For non-commands, use the message queue system
+    await this.messageBatcher.addToBatch(message, async (batchedMessage) => {
+      await this.processBatchedMessage(batchedMessage);
+    });
+  }
 
-    // ENHANCED: Filter and clean the message WITH embed content processing
-    const filterResult = this.messageFilter.filterMessage(message);
-    if (!filterResult.shouldProcess) {
-      logger.debug('Message filtered out', {
-        source: 'discord',
-        reason: filterResult.reason,
-        author: message.author.username,
-        hasEmbeds: filterResult.hasEmbeds || false,
-        hasImages: filterResult.hasImages || false
-      });
-      return;
-    }
-
-    // Log comprehensive message content info
-    if (filterResult.hasEmbeds && filterResult.embedInfo) {
-      logger.info('Message contains embed content', {
-        source: 'discord',
-        author: message.author.username,
-        channel: message.channel.name,
-        embedCount: filterResult.embedInfo.count,
-        embedTypes: filterResult.embedInfo.types,
-        hasImages: hasImages,
-        hasTextContent: !!message.originalContent,
-        embedPreview: filterResult.embedInfo.preview || 'No preview'
-      });
-    }
-
-    // Add to conversation history (now with embed content if present)
-    await this.conversationManager.addMessage(message);
-
-    // Use MultiLLM Decision Engine for autonomous decision making
+  async processBatchedMessage(message) {
     try {
+      // Get filter result for the batched message
+      const filterResult = this.messageFilter.filterMessage(message);
+
+      // Process any images in the batch
+      const hasImages = await this.processMessageImages(message);
+      if (hasImages) {
+        logger.info('Images processed for batch', {
+          source: 'discord',
+          author: message.author.username,
+          channel: message.channel.name,
+          batchSize: message.originalMessages?.length || 1,
+          embedPreview: filterResult.embedInfo.preview || 'No preview'
+        });
+      }
+
+      // Add the entire batch to conversation history as one unit
+      await this.conversationManager.addMessage(message);
+
+      // Use decision engine with batch context
       const decision = await this.decisionEngine.makeDecision({
         message: filterResult.cleanedMessage,
         channel: message.channel,
@@ -107,33 +88,35 @@ class MessageProcessor {
         hasImages: hasImages,
         hasEmbeds: filterResult.hasEmbeds || false,
         embedCount: filterResult.embedInfo?.count || 0,
-        embedTypes: filterResult.embedInfo?.types || []
+        embedTypes: filterResult.embedInfo?.types || [],
+        // Batch-specific context
+        isBatch: !!(message.originalMessages && message.originalMessages.length > 1),
+        batchSize: message.originalMessages?.length || 1,
+        batchMessages: message.originalMessages || [message]
       });
 
-      logger.info('Decision engine result', {
+      logger.info('Batch decision made', {
         source: 'discord',
         author: message.author.username,
         channel: message.channel.name,
         action: decision.action,
         confidence: decision.confidence,
         reasoning: decision.reasoning,
-        hasEmbeds: filterResult.hasEmbeds || false,
+        batchSize: message.originalMessages?.length || 1,
         hasImages: hasImages
       });
 
-      // Execute the decided action
+      // Execute the decided action with batch-aware logic
       await this.actionExecutor.executeAction(decision, message);
 
-    } catch (decisionError) {
-      logger.error('Decision engine failed, falling back to legacy processing', {
+    } catch (error) {
+      logger.error('Error processing batched message', {
         source: 'discord',
-        error: decisionError.message,
+        error: error.message,
         author: message.author.username,
-        channel: message.channel.name
+        channel: message.channel.name,
+        batchSize: message.originalMessages?.length || 1
       });
-
-      // Fallback to legacy batching system
-      await this.fallbackToLegacyProcessing(message);
     }
   }
 

@@ -252,6 +252,152 @@ IMPORTANT: Your response should be ONLY the dialogue/message content. No actions
 
     return recommendations;
   }
+
+  buildBatchAwareDecisionPrompt(message, channelContext) {
+    const persona = storage.getPersona();
+
+    // Build image context if available
+    let imageContext = '';
+    if (channelContext.hasImages && message.imageAnalysis) {
+      const analyses = Array.isArray(message.imageAnalysis) ? message.imageAnalysis : [message.imageAnalysis];
+      imageContext = `\nIMAGES SHARED:\n${analyses.map((analysis, index) =>
+        `Image ${index + 1}: ${analysis.analysis.substring(0, 200)}...`
+      ).join('\n')}\n`;
+    }
+
+    // Build conversation context
+    let conversationContext = '';
+    if (channelContext.conversationHistory && channelContext.conversationHistory.length > 0) {
+      const recentMessages = channelContext.conversationHistory.slice(-3);
+      conversationContext = `\nRECENT CONVERSATION:\n${recentMessages.map(msg =>
+        `${msg.author}: ${msg.content.substring(0, 100)}${msg.content.length > 100 ? '...' : ''}`
+      ).join('\n')}\n`;
+    }
+
+    // Build batch context
+    let batchContext = '';
+    if (message.originalMessages && message.originalMessages.length > 1) {
+      batchContext = `\nMESSAGE BATCH DETAILS:
+Total messages: ${message.originalMessages.length}
+Individual messages:
+${message.originalMessages.map((msg, index) =>
+        `${index + 1}. ${msg.content || '[attachment/embed]'}`
+      ).join('\n')}
+
+Combined content: "${message.content}"
+
+This user sent multiple messages in quick succession. Consider:
+- Should you respond to the overall message or a specific part?
+- If responding, which message should you reply to? (use 'reply' for Discord threading)
+- Or should you just send a response to the channel? (use 'respond' for general chat)
+- Images and questions usually deserve acknowledgment
+`;
+    }
+
+    return `You are ${persona.name || 'Atlas'}, a Discord bot with autonomous decision-making.
+
+Your personality: ${persona.description || 'A helpful, engaging bot'}
+
+Current situation:
+- Channel: ${channelContext.channelName} in ${channelContext.serverName}
+- Recent activity level: ${channelContext.activityLevel || 'normal'}
+- Your last action: ${channelContext.lastAction || 'none'} (${this.timeSinceLastAction()} ago)
+
+${conversationContext}
+${batchContext}
+
+New message to analyze:
+Author: ${message.author.username}
+Content: "${message.content}"
+${imageContext}
+
+DECISION TIME: Choose ONE action and provide reasoning.
+
+Respond in this EXACT format:
+ACTION: [respond|reply|react|ignore|status_change]
+CONFIDENCE: [0.0-1.0]
+REASONING: [brief explanation]
+EMOJI: [only if ACTION is react, otherwise leave blank]
+STATUS: [only if ACTION is status_change: online|away|dnd|invisible]
+
+Guidelines for batched messages:
+- respond: Send a general response to the channel (good for casual conversation flow)
+- reply: Use Discord's reply feature to connect to a specific message (good for direct responses, questions, or acknowledging specific content like images)
+- react: Add emoji reaction (good for quick acknowledgment)
+- ignore: Take no action
+
+For message batches, consider:
+- Is there a specific message that warrants a direct reply? (use 'reply')
+- Or should you just continue the conversation naturally? (use 'respond')
+- Images and questions often deserve replies for better context
+- Don't feel obligated to respond to every batch - be selective like a human`;
+  }
+
+  buildQuickDecisionPrompt(message, channelContext) {
+    // Check if this should use batch-aware prompt
+    if (message.originalMessages && message.originalMessages.length > 1) {
+      return this.buildBatchAwareDecisionPrompt(message, channelContext);
+    }
+
+    // Use existing logic for single messages
+    const persona = storage.getPersona();
+
+    // Build image context if available
+    let imageContext = '';
+    if (channelContext.hasImages && message.imageAnalysis) {
+      const analyses = Array.isArray(message.imageAnalysis) ? message.imageAnalysis : [message.imageAnalysis];
+      imageContext = `\nIMAGES SHARED:\n${analyses.map((analysis, index) =>
+        `Image ${index + 1}: ${analysis.analysis.substring(0, 200)}...`
+      ).join('\n')}\n`;
+    }
+
+    // Build conversation context
+    let conversationContext = '';
+    if (channelContext.conversationHistory && channelContext.conversationHistory.length > 0) {
+      const recentMessages = channelContext.conversationHistory.slice(-3);
+      conversationContext = `\nRECENT CONVERSATION:\n${recentMessages.map(msg =>
+        `${msg.author}: ${msg.content.substring(0, 100)}${msg.content.length > 100 ? '...' : ''}`
+      ).join('\n')}\n`;
+    }
+
+    return `You are ${persona.name || 'Atlas'}, a Discord bot with autonomous decision-making.
+
+Your personality: ${persona.description || 'A helpful, engaging bot'}
+
+Current situation:
+- Channel: ${channelContext.channelName} in ${channelContext.serverName}
+- Recent activity level: ${channelContext.activityLevel || 'normal'}
+- Your last action: ${channelContext.lastAction || 'none'} (${this.timeSinceLastAction()} ago)
+
+${conversationContext}
+New message to analyze:
+Author: ${message.author.username}
+Content: "${message.content}"
+${imageContext}
+
+DECISION TIME: Choose ONE action and provide reasoning.
+
+Respond in this EXACT format:
+ACTION: [respond|reply|react|ignore|status_change]
+CONFIDENCE: [0.0-1.0]
+REASONING: [brief explanation]
+EMOJI: [only if ACTION is react, otherwise leave blank]
+STATUS: [only if ACTION is status_change: online|away|dnd|invisible]
+
+Guidelines:
+- respond: Generate a full conversational response (normal send) - use for general chat, flowing conversation
+- reply: Generate a response using Discord's reply function (creates visual connection) - use for direct questions, specific references to previous messages
+- react: Add emoji reaction to their message  
+- ignore: Take no action, let conversation flow
+- status_change: Update your Discord status
+
+Consider:
+- Don't respond to every message (be selective like a human)
+- Use respond for most casual conversation and general chat
+- Use reply only when the message is clearly directed at you or references something specific
+- React to funny/interesting content or images
+- Images often warrant some kind of response or reaction`;
+  }
 }
 
 module.exports = PromptBuilder;
