@@ -9,7 +9,7 @@ class MessageFilter {
     }
 
     /**
-     * Filter and validate message for processing with embed support
+     * Filter and validate message for processing with embed support and mention resolution
      * @param {Object} message - Discord message object
      * @returns {Object} - { shouldProcess: boolean, cleanedMessage?: Object, reason?: string }
      */
@@ -58,12 +58,15 @@ class MessageFilter {
         }
 
         // Clean emotes from message content
-        const cleanContent = this.emoteFilter.removeEmotes(message.content);
+        let cleanContent = this.emoteFilter.removeEmotes(message.content);
+
+        // NEW: Resolve user mentions to readable names
+        cleanContent = this.resolveMentions(cleanContent, message);
 
         // If cleaning removed everything, check if we have images or embeds
         if (!cleanContent || cleanContent.trim().length === 0) {
             if (hasImages || embedResult.hasEmbeds) {
-                logger.debug('Message became empty after emote removal but has images/embeds, processing anyway', {
+                logger.debug('Message became empty after cleaning but has images/embeds, processing anyway', {
                     source: 'discord',
                     author: message.author.username,
                     channel: message.channel.name,
@@ -93,7 +96,7 @@ class MessageFilter {
                 };
             }
 
-            logger.debug('Message became empty after emote removal', {
+            logger.debug('Message became empty after cleaning', {
                 source: 'discord',
                 author: message.author.username,
                 channel: message.channel.name,
@@ -148,6 +151,95 @@ class MessageFilter {
             hasEmbeds: embedResult.hasEmbeds,
             embedInfo: embedResult.summary
         };
+    }
+
+    /**
+     * Resolve user mentions to readable names for LLM context
+     * @param {string} content - Message content with mentions
+     * @param {Object} message - Discord message object
+     * @returns {string} - Content with resolved mentions
+     */
+    resolveMentions(content, message) {
+        if (!content || !message.guild) {
+            return content;
+        }
+
+        try {
+            // Pattern to match Discord user mentions: <@userid> or <@!userid>
+            const mentionPattern = /<@!?(\d+)>/g;
+
+            let resolvedContent = content;
+            let match;
+            let resolvedCount = 0;
+
+            while ((match = mentionPattern.exec(content)) !== null) {
+                const userId = match[1];
+                const fullMention = match[0];
+
+                // Try to get the user from the guild
+                const member = message.guild.members.cache.get(userId);
+
+                if (member) {
+                    // Use display name (nickname) or username
+                    const displayName = member.displayName || member.user.username;
+                    resolvedContent = resolvedContent.replace(fullMention, `@${displayName}`);
+                    resolvedCount++;
+
+                    logger.debug('Resolved user mention', {
+                        source: 'discord',
+                        userId: userId,
+                        displayName: displayName,
+                        originalMention: fullMention
+                    });
+                } else {
+                    // Fallback: try to resolve just username if member not cached
+                    const user = message.client.users.cache.get(userId);
+                    if (user) {
+                        resolvedContent = resolvedContent.replace(fullMention, `@${user.username}`);
+                        resolvedCount++;
+
+                        logger.debug('Resolved user mention (fallback)', {
+                            source: 'discord',
+                            userId: userId,
+                            username: user.username,
+                            originalMention: fullMention
+                        });
+                    } else {
+                        // Ultimate fallback: keep the mention but make it more readable
+                        resolvedContent = resolvedContent.replace(fullMention, `@User(${userId})`);
+
+                        logger.warn('Could not resolve user mention', {
+                            source: 'discord',
+                            userId: userId,
+                            originalMention: fullMention
+                        });
+                    }
+                }
+            }
+
+            if (resolvedCount > 0) {
+                logger.debug('Resolved mentions in message', {
+                    source: 'discord',
+                    author: message.author.username,
+                    channel: message.channel.name,
+                    resolvedCount: resolvedCount,
+                    originalContent: content.substring(0, 100),
+                    resolvedContent: resolvedContent.substring(0, 100)
+                });
+            }
+
+            return resolvedContent;
+
+        } catch (error) {
+            logger.error('Error resolving mentions', {
+                source: 'discord',
+                error: error.message,
+                originalContent: content.substring(0, 100)
+            });
+
+            // Return original content if resolution fails
+            return content;
+        }
     }
 
     /**
