@@ -34,7 +34,7 @@ class MessageFilter {
                 // Keep original message but mark it appropriately
                 message.processForImages = hasImages;
                 message.processForEmbeds = embedResult.hasEmbeds;
-                
+
                 return {
                     shouldProcess: true,
                     cleanedMessage: message,
@@ -79,7 +79,7 @@ class MessageFilter {
                 } else {
                     message.content = '[Image]'; // Fallback for image-only
                 }
-                
+
                 message.originalContent = message.content;
                 message.processForImages = hasImages;
                 message.processForEmbeds = embedResult.hasEmbeds;
@@ -116,7 +116,7 @@ class MessageFilter {
             // Enhance the cleaned content with embed information
             message.content = `${cleanContent}\n\n${embedResult.formattedContent}`;
             message.processForEmbeds = true;
-            
+
             logger.debug('Enhanced message with embed content', {
                 source: 'discord',
                 author: message.author.username,
@@ -183,13 +183,28 @@ class MessageFilter {
      * @returns {boolean} - True if attachment is an image
      */
     isImageAttachment(attachment) {
+        if (!attachment.contentType) {
+            // Fallback to filename extension
+            const ext = attachment.name?.toLowerCase().split('.').pop();
+            return ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+        }
+
+        return attachment.contentType.startsWith('image/');
+    }
+
+    /**
+     * Check if attachment is a GIF
+     * @param {Object} attachment - Discord attachment object
+     * @returns {boolean} - True if attachment is a GIF
+     */
+    isGifAttachment(attachment) {
         if (attachment.contentType) {
-            return attachment.contentType.startsWith('image/');
+            return attachment.contentType === 'image/gif';
         }
 
         // Fallback to filename extension
         const ext = attachment.name?.toLowerCase().split('.').pop();
-        return ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+        return ext === 'gif';
     }
 
     /**

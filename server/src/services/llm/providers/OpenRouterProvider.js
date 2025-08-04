@@ -5,7 +5,7 @@ class OpenRouterProvider {
     this.name = 'openrouter';
     this.baseURL = 'https://openrouter.ai/api/v1';
     this.maxImageSize = 50 * 1024 * 1024; // 50MB
-    
+
     logger.info('OpenRouter provider initialized', {
       source: 'llm',
       provider: this.name,
@@ -137,6 +137,132 @@ class OpenRouterProvider {
     }
   }
 
+  async analyzeMultipleImages(frames, prompt, settings = {}) {
+    if (!this.isAvailable(settings.apiKey)) {
+      throw new Error('OpenRouter API key not provided');
+    }
+
+    try {
+      logger.debug('Starting multi-frame image analysis with OpenRouter', {
+        source: 'llm',
+        provider: this.name,
+        model: settings.model,
+        frameCount: frames.length,
+        promptLength: prompt.length
+      });
+
+      // Convert all frame buffers to base64
+      const imageContents = frames.map((frame, index) => {
+        const base64Image = frame.buffer.toString('base64');
+        const mimeType = this.detectMimeType(frame.buffer);
+        const dataUrl = `data:${mimeType};base64,${base64Image}`;
+
+        return {
+          type: 'image_url',
+          image_url: {
+            url: dataUrl,
+            detail: this.getImageDetail(settings.quality)
+          }
+        };
+      });
+
+      // Prepare the request with text first, then all images
+      const messages = [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: prompt
+            },
+            ...imageContents
+          ]
+        }
+      ];
+
+      const requestBody = {
+        model: settings.model || 'anthropic/claude-3.5-sonnet',
+        messages: messages,
+        max_tokens: settings.maxTokens || 1500,
+        temperature: settings.temperature || 0.7
+      };
+
+      // LOG THE FULL PROMPT
+      logger.info('Multi-frame vision prompt generated', {
+        source: 'llm',
+        provider: this.name,
+        model: settings.model,
+        promptLength: prompt.length,
+        frameCount: frames.length,
+        totalImageSize: `${frames.reduce((sum, f) => sum + f.buffer.length, 0) / 1024}KB`,
+        frameDescriptions: frames.map(f => f.description),
+        quality: this.getImageDetail(settings.quality),
+        fullPrompt: prompt,
+        settings: {
+          max_tokens: settings.maxTokens || 1500,
+          temperature: settings.temperature || 0.7
+        }
+      });
+
+      const startTime = Date.now();
+      const response = await fetch(`${this.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${settings.apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://atlas-bot.local',
+          'X-Title': 'Atlas Discord Bot'
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      const apiTime = Date.now() - startTime;
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`OpenRouter API error ${response.status}: ${errorData.error?.message || response.statusText}`);
+      }
+
+      const data = await response.json();
+      const extractedResult = this.extractContent(data);
+
+      // LOG THE FULL RESPONSE
+      logger.info('Multi-frame vision response received', {
+        source: 'llm',
+        provider: this.name,
+        model: settings.model,
+        responseLength: extractedResult.content.length,
+        apiTime: `${apiTime}ms`,
+        usage: data.usage || 'not provided',
+        finishReason: extractedResult.finishReason,
+        frameCount: frames.length,
+        fullResponse: extractedResult.content
+      });
+
+      logger.success('Multi-frame image analysis completed', {
+        source: 'llm',
+        provider: this.name,
+        model: settings.model,
+        apiTime: `${apiTime}ms`,
+        usage: data.usage || 'not provided',
+        frameCount: frames.length
+      });
+
+      return extractedResult;
+
+    } catch (error) {
+      logger.error('OpenRouter multi-frame image analysis failed', {
+        source: 'llm',
+        provider: this.name,
+        error: error.message,
+        model: settings.model,
+        frameCount: frames.length,
+        promptPreview: prompt.substring(0, 200) + '...'
+      });
+      throw error;
+    }
+  }
+
   async fetchAvailableModels(apiKey) {
     if (!apiKey) {
       throw new Error('API key required to fetch models');
@@ -154,9 +280,9 @@ class OpenRouterProvider {
       }
 
       const data = await response.json();
-      
+
       // Filter for vision-capable models
-      const visionModels = data.data.filter(model => 
+      const visionModels = data.data.filter(model =>
         model.architecture?.input_modalities?.includes('image') ||
         model.name.toLowerCase().includes('vision') ||
         model.id.toLowerCase().includes('vision') ||
@@ -187,22 +313,22 @@ class OpenRouterProvider {
     if (buffer.length < 4) return 'application/octet-stream';
 
     const header = buffer.slice(0, 4);
-    
+
     // PNG: 89 50 4E 47
     if (header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47) {
       return 'image/png';
     }
-    
+
     // JPEG: FF D8 FF
     if (header[0] === 0xFF && header[1] === 0xD8 && header[2] === 0xFF) {
       return 'image/jpeg';
     }
-    
+
     // GIF: 47 49 46 38
     if (header[0] === 0x47 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x38) {
       return 'image/gif';
     }
-    
+
     // WebP: check for WEBP in bytes 8-11
     if (buffer.length >= 12) {
       const webpHeader = buffer.slice(8, 12);
@@ -210,7 +336,7 @@ class OpenRouterProvider {
         return 'image/webp';
       }
     }
-    
+
     // Default to JPEG if we can't detect
     return 'image/jpeg';
   }
@@ -231,7 +357,7 @@ class OpenRouterProvider {
     }
 
     const firstChoice = response.choices[0];
-    
+
     if (firstChoice.message && firstChoice.message.content) {
       return {
         content: firstChoice.message.content,
@@ -240,7 +366,7 @@ class OpenRouterProvider {
         finishReason: firstChoice.finish_reason
       };
     }
-    
+
     throw new Error('No content found in API response');
   }
 
@@ -269,27 +395,27 @@ class OpenRouterProvider {
 
   validateSettings(settings) {
     const errors = [];
-    
+
     if (!settings.apiKey || settings.apiKey.trim() === '') {
       errors.push('API key is required');
     }
-    
+
     if (!settings.model || settings.model.trim() === '') {
       errors.push('Model selection is required');
     }
-    
+
     if (settings.maxTokens !== undefined) {
       if (settings.maxTokens < 1 || settings.maxTokens > 4000) {
         errors.push('Max tokens must be between 1 and 4000');
       }
     }
-    
+
     if (settings.temperature !== undefined) {
       if (settings.temperature < 0 || settings.temperature > 2) {
         errors.push('Temperature must be between 0 and 2');
       }
     }
-    
+
     return errors;
   }
 }

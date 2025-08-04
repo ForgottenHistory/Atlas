@@ -12,7 +12,9 @@ class ImageExtractor {
             url: attachment.url,
             filename: attachment.name,
             size: attachment.size,
-            source: 'attachment'
+            source: 'attachment',
+            isGif: this.isGifAttachment(attachment),
+            contentType: attachment.contentType
           });
         }
       });
@@ -22,17 +24,23 @@ class ImageExtractor {
     if (message.embeds && message.embeds.length > 0) {
       message.embeds.forEach(embed => {
         if (embed.image && embed.image.url) {
+          const isGif = embed.image.url.toLowerCase().includes('.gif');
           images.push({
             url: embed.image.url,
             filename: 'embedded_image',
-            source: 'embed'
+            source: 'embed',
+            isGif: isGif,
+            contentType: isGif ? 'image/gif' : null
           });
         }
         if (embed.thumbnail && embed.thumbnail.url) {
+          const isGif = embed.thumbnail.url.toLowerCase().includes('.gif');
           images.push({
             url: embed.thumbnail.url,
             filename: 'thumbnail',
-            source: 'thumbnail'
+            source: 'thumbnail',
+            isGif: isGif,
+            contentType: isGif ? 'image/gif' : null
           });
         }
       });
@@ -41,10 +49,21 @@ class ImageExtractor {
     logger.debug('Extracted images from Discord message', {
       source: 'imageProcessing',
       imageCount: images.length,
+      gifCount: images.filter(img => img.isGif).length,
       sources: images.map(img => img.source)
     });
 
     return images;
+  }
+
+  isGifAttachment(attachment) {
+    if (attachment.contentType) {
+      return attachment.contentType === 'image/gif';
+    }
+
+    // Fallback to filename extension
+    const ext = attachment.name?.toLowerCase().split('.').pop();
+    return ext === 'gif';
   }
 
   isImageAttachment(attachment) {

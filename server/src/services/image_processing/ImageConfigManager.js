@@ -10,7 +10,19 @@ class ImageConfigManager {
       model: llmSettings.image_model,
       apiKey: llmSettings.image_api_key,
       maxSize: llmSettings.image_max_size || 5,
-      quality: llmSettings.image_quality || 2
+      quality: llmSettings.image_quality || 2,
+      gifFrameCount: llmSettings.gif_frame_count || 2
+    };
+  }
+
+  getDefaultSettings() {
+    return {
+      provider: '',
+      model: '',
+      apiKey: '',
+      maxSize: 5,
+      quality: 2,
+      gifFrameCount: 2
     };
   }
 
@@ -27,7 +39,7 @@ class ImageConfigManager {
 
   getProviderConfig(providerName) {
     const settings = this.getImageSettings();
-    
+
     if (settings.provider !== providerName) {
       return null;
     }
@@ -45,7 +57,7 @@ class ImageConfigManager {
     // For now, just validate the format
     const requiredFields = ['provider', 'model', 'apiKey'];
     const missingFields = requiredFields.filter(field => !newSettings[field]);
-    
+
     if (missingFields.length > 0) {
       throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
     }

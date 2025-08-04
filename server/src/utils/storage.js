@@ -16,7 +16,7 @@ class Storage {
     try {
       // Create data directory if it doesn't exist
       await fs.mkdir(path.dirname(this.filepath), { recursive: true });
-      
+
       // Try to load existing data
       try {
         const content = await fs.readFile(this.filepath, 'utf8');
@@ -26,7 +26,7 @@ class Storage {
         this.data = this.getDefaultData();
         await this.save();
       }
-      
+
       this.initialized = true;
       console.log('Storage initialized:', this.filepath);
     } catch (error) {
@@ -52,7 +52,15 @@ class Storage {
           repetition_penalty: 1,
           min_p: '',
           max_characters: 2000,
-          context_limit: 4096
+          context_limit: 4096,
+          // Image processing settings
+          image_provider: '',
+          image_model: '',
+          image_api_key: '',
+          image_quality: 2,
+          image_max_size: 5,
+          // GIF processing settings
+          gif_frame_count: 2
         }
       },
       persona: {
@@ -77,7 +85,7 @@ class Storage {
 
   async save() {
     if (!this.data) return false;
-    
+
     try {
       await fs.writeFile(this.filepath, JSON.stringify(this.data, null, 2));
       return true;
@@ -90,19 +98,19 @@ class Storage {
   // Settings methods
   async updateSettings(newSettings) {
     if (!this.data) return false;
-    
+
     this.data.settings = { ...this.data.settings, ...newSettings };
     return await this.save();
   }
 
   async updateLLMSettings(llmSettings) {
     if (!this.data) return false;
-    
+
     // Ensure the llm object exists
     if (!this.data.settings.llm) {
       this.data.settings.llm = this.getDefaultData().settings.llm;
     }
-    
+
     // Merge new LLM settings with existing ones
     this.data.settings.llm = { ...this.data.settings.llm, ...llmSettings };
     return await this.save();
@@ -122,7 +130,7 @@ class Storage {
   // Persona methods
   async updatePersona(newPersona) {
     if (!this.data) return false;
-    
+
     this.data.persona = { ...this.data.persona, ...newPersona };
     return await this.save();
   }
@@ -134,16 +142,16 @@ class Storage {
   // Activity methods
   async addActivity(message) {
     if (!this.data) return false;
-    
+
     const activity = {
       id: Date.now(),
       message,
       timestamp: 'Just now'
     };
-    
+
     this.data.recentActivity.unshift(activity);
     this.data.recentActivity = this.data.recentActivity.slice(0, 10);
-    
+
     await this.save();
     return activity;
   }
@@ -155,7 +163,7 @@ class Storage {
   // Stats methods
   updateStats(newStats) {
     if (!this.data) return false;
-    
+
     this.data.stats = { ...this.data.stats, ...newStats };
     // Don't auto-save stats as they update frequently
   }
@@ -172,7 +180,7 @@ class Storage {
   // General setter
   async set(key, value) {
     if (!this.data) return false;
-    
+
     this.data[key] = value;
     return await this.save();
   }
