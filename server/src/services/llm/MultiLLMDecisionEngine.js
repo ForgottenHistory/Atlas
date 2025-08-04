@@ -2,6 +2,7 @@ const DecisionMaker = require('./decision/DecisionMaker');
 const ContextAnalyzer = require('./decision/ContextAnalyzer');
 const DecisionParser = require('./decision/DecisionParser');
 const DecisionTracker = require('./decision/DecisionTracker');
+const ConversationHistoryLoader = require('../discord/conversation/ConversationHistoryLoader'); // Move this to top
 const logger = require('../logger/Logger');
 
 class MultiLLMDecisionEngine {
@@ -10,6 +11,7 @@ class MultiLLMDecisionEngine {
     this.decisionMaker = new DecisionMaker();
     this.decisionParser = new DecisionParser();
     this.decisionTracker = new DecisionTracker();
+    this.historyLoader = null; // Initialize as null, will be set when needed
 
     logger.info('Multi-LLM Decision Engine initialized with image awareness', {
       source: 'llm',
@@ -22,6 +24,9 @@ class MultiLLMDecisionEngine {
    */
   async makeDecision(context) {
     try {
+      // Check if we need to load recent conversation history on-demand
+      await this.ensureConversationHistory(context);
+
       // Analyze the context for decision making
       const analysisContext = this.contextAnalyzer.analyzeContext(context);
 
@@ -52,8 +57,65 @@ class MultiLLMDecisionEngine {
   }
 
   /**
-   * Analyze if bot should proactively engage with channel
+   * Ensure we have recent conversation history for context-aware decisions
    */
+  async ensureConversationHistory(context) {
+    try {
+      const { conversationHistory = [], conversationManager } = context;
+      const channelId = context.message.channel.id;
+
+      // If we have sufficient recent history, no need to load
+      if (conversationHistory.length >= 3) {
+        return;
+      }
+
+      // Initialize history loader if not exists
+      if (!this.historyLoader) {
+        // Get the Discord client - handle both wrapped and raw clients
+        const discordClient = context.message.client.getClient ? 
+          context.message.client : 
+          context.message.client;
+        
+        this.historyLoader = new ConversationHistoryLoader(discordClient);
+      }
+
+      // Check if we should load history
+      const shouldLoad = await this.historyLoader.shouldLoadHistory(channelId, conversationManager);
+      
+      if (shouldLoad) {
+        logger.info('Loading recent conversation history for decision context', {
+          source: 'llm',
+          channelId: channelId,
+          channelName: context.message.channel.name,
+          currentHistoryLength: conversationHistory.length
+        });
+
+        const loaded = await this.historyLoader.loadRecentHistory(channelId, conversationManager);
+        
+        if (loaded) {
+          // Update the context with fresh history
+          context.conversationHistory = conversationManager.getHistory(channelId, 10);
+          
+          logger.success('Decision context enhanced with loaded history', {
+            source: 'llm',
+            channelId: channelId,
+            newHistoryLength: context.conversationHistory.length
+          });
+        }
+      }
+
+    } catch (error) {
+      logger.error('Failed to ensure conversation history', {
+        source: 'llm',
+        error: error.message,
+        stack: error.stack, // Add stack trace for better debugging
+        channelId: context.message?.channel?.id
+      });
+      // Don't fail the decision process if history loading fails
+    }
+  }
+
+  // ... rest of your methods remain the same
   async analyzeChannelActivity(recentMessages, channelInfo) {
     try {
       const analysisContext = this.contextAnalyzer.buildChannelAnalysisContext(recentMessages, channelInfo);
