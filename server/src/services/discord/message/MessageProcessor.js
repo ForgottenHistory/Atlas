@@ -13,7 +13,7 @@ class MessageProcessor {
   constructor(discordClient, channelManager) {
     this.discordClient = discordClient;
     this.channelManager = channelManager;
-    
+
     // Initialize specialized services
     this.conversationManager = new ConversationManager();
     this.commandHandler = new CommandHandler(discordClient, this.conversationManager);
@@ -21,7 +21,7 @@ class MessageProcessor {
     this.messageFilter = new MessageFilter();
     this.messageBatcher = new MessageBatcher(3000); // 3 second timeout
     this.imageProcessor = imageProcessingService;
-    
+
     // Autonomous decision making
     this.decisionEngine = new MultiLLMDecisionEngine();
     this.actionExecutor = new ActionExecutor(discordClient, this.conversationManager);
@@ -33,11 +33,11 @@ class MessageProcessor {
     if (!shouldProcess.shouldProcess) {
       return; // Skip processing based on filter decision
     }
-    
+
     // Check if it's a command
     const settings = storage.getSettings();
     const prefix = settings.commandPrefix || '!';
-    
+
     if (message.content.startsWith(prefix)) {
       return await this.commandHandler.handleCommand(message);
     }
@@ -48,18 +48,34 @@ class MessageProcessor {
       await this.processMessageImages(message);
     }
 
-    // Filter and clean the message
+    // ENHANCED: Filter and clean the message WITH embed content processing
     const filterResult = this.messageFilter.filterMessage(message);
     if (!filterResult.shouldProcess) {
       logger.debug('Message filtered out', {
         source: 'discord',
         reason: filterResult.reason,
-        author: message.author.username
+        author: message.author.username,
+        hasEmbeds: filterResult.hasEmbeds || false,
+        hasImages: filterResult.hasImages || false
       });
       return;
     }
 
-    // Add to conversation history (now with image analysis if present)
+    // Log comprehensive message content info
+    if (filterResult.hasEmbeds && filterResult.embedInfo) {
+      logger.info('Message contains embed content', {
+        source: 'discord',
+        author: message.author.username,
+        channel: message.channel.name,
+        embedCount: filterResult.embedInfo.count,
+        embedTypes: filterResult.embedInfo.types,
+        hasImages: hasImages,
+        hasTextContent: !!message.originalContent,
+        embedPreview: filterResult.embedInfo.preview || 'No preview'
+      });
+    }
+
+    // Add to conversation history (now with embed content if present)
     await this.conversationManager.addMessage(message);
 
     // Use MultiLLM Decision Engine for autonomous decision making
@@ -69,7 +85,10 @@ class MessageProcessor {
         channel: message.channel,
         author: message.author,
         conversationHistory: this.conversationManager.getHistory(message.channel.id, 10),
-        hasImages: hasImages
+        hasImages: hasImages,
+        hasEmbeds: filterResult.hasEmbeds || false,
+        embedCount: filterResult.embedInfo?.count || 0,
+        embedTypes: filterResult.embedInfo?.types || []
       });
 
       logger.info('Decision engine result', {
@@ -78,7 +97,9 @@ class MessageProcessor {
         channel: message.channel.name,
         action: decision.action,
         confidence: decision.confidence,
-        reasoning: decision.reasoning
+        reasoning: decision.reasoning,
+        hasEmbeds: filterResult.hasEmbeds || false,
+        hasImages: hasImages
       });
 
       // Execute the decided action
@@ -101,7 +122,7 @@ class MessageProcessor {
     try {
       // Get image processing settings from LLM settings
       const llmSettings = storage.getLLMSettings();
-      
+
       logger.debug('Checking image processing settings', {
         source: 'discord',
         image_provider: llmSettings.image_provider,
@@ -109,7 +130,7 @@ class MessageProcessor {
         hasModel: !!llmSettings.image_model,
         messageId: message.id
       });
-      
+
       // Check if image processing is enabled
       if (!llmSettings.image_provider || llmSettings.image_provider === '') {
         logger.debug('Image processing disabled - no provider set', {
@@ -150,11 +171,11 @@ class MessageProcessor {
       };
 
       const results = await this.imageProcessor.processMessageImages(message, imageSettings);
-      
+
       if (results && results.length > 0) {
         // Add image analysis to the message object for later use
         message.imageAnalysis = results;
-        
+
         logger.success('Image analysis completed', {
           source: 'discord',
           messageId: message.id,

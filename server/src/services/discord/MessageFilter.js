@@ -1,36 +1,46 @@
 const emoteFilter = require('../../utils/emoteFilter');
+const EmbedProcessor = require('./embed/EmbedProcessor');
 const logger = require('../logger/Logger');
 
 class MessageFilter {
     constructor() {
         this.emoteFilter = emoteFilter;
+        this.embedProcessor = new EmbedProcessor();
     }
 
     /**
-       * Filter and validate message for processing
-       * @param {Object} message - Discord message object
-       * @returns {Object} - { shouldProcess: boolean, cleanedMessage?: Object, reason?: string }
-       */
+     * Filter and validate message for processing with embed support
+     * @param {Object} message - Discord message object
+     * @returns {Object} - { shouldProcess: boolean, cleanedMessage?: Object, reason?: string }
+     */
     filterMessage(message) {
         const hasImages = this.messageHasImages(message);
+        const embedResult = this.embedProcessor.processMessageEmbeds(message);
 
         // Check if message is emote-only
         if (this.emoteFilter.isEmoteOnly(message.content)) {
-            // If message has images, we should still process it even if text is emote-only
-            if (hasImages) {
-                logger.debug('Message is emote-only but has images, processing anyway', {
+            // If message has images or embeds, process it anyway
+            if (hasImages || embedResult.hasEmbeds) {
+                logger.debug('Message is emote-only but has images/embeds, processing anyway', {
                     source: 'discord',
                     author: message.author.username,
                     channel: message.channel.name,
                     originalContent: message.content,
-                    hasImages: true
+                    hasImages: hasImages,
+                    hasEmbeds: embedResult.hasEmbeds,
+                    embedCount: embedResult.embedCount
                 });
 
-                // Keep original message but mark it as having images
-                message.processForImages = true;
+                // Keep original message but mark it appropriately
+                message.processForImages = hasImages;
+                message.processForEmbeds = embedResult.hasEmbeds;
+                
                 return {
                     shouldProcess: true,
-                    cleanedMessage: message
+                    cleanedMessage: message,
+                    hasImages: hasImages,
+                    hasEmbeds: embedResult.hasEmbeds,
+                    embedInfo: embedResult.summary
                 };
             }
 
@@ -50,25 +60,36 @@ class MessageFilter {
         // Clean emotes from message content
         const cleanContent = this.emoteFilter.removeEmotes(message.content);
 
-        // If cleaning removed everything, check if we have images
+        // If cleaning removed everything, check if we have images or embeds
         if (!cleanContent || cleanContent.trim().length === 0) {
-            if (hasImages) {
-                logger.debug('Message became empty after emote removal but has images, processing anyway', {
+            if (hasImages || embedResult.hasEmbeds) {
+                logger.debug('Message became empty after emote removal but has images/embeds, processing anyway', {
                     source: 'discord',
                     author: message.author.username,
                     channel: message.channel.name,
                     originalContent: message.content,
-                    hasImages: true
+                    hasImages: hasImages,
+                    hasEmbeds: embedResult.hasEmbeds,
+                    embedCount: embedResult.embedCount
                 });
 
-                // Set a placeholder content for image-only messages
-                message.content = '[Image]';
+                // Set appropriate content based on what we have
+                if (embedResult.hasEmbeds) {
+                    message.content = embedResult.formattedContent;
+                } else {
+                    message.content = '[Image]'; // Fallback for image-only
+                }
+                
                 message.originalContent = message.content;
-                message.processForImages = true;
+                message.processForImages = hasImages;
+                message.processForEmbeds = embedResult.hasEmbeds;
 
                 return {
                     shouldProcess: true,
-                    cleanedMessage: message
+                    cleanedMessage: message,
+                    hasImages: hasImages,
+                    hasEmbeds: embedResult.hasEmbeds,
+                    embedInfo: embedResult.summary
                 };
             }
 
@@ -85,10 +106,26 @@ class MessageFilter {
             };
         }
 
-        // FIX: Don't create new object, modify the original message directly
+        // Message has processable text content
         const originalContent = message.content;
         message.content = cleanContent;
         message.originalContent = originalContent;
+
+        // Add embed content if present
+        if (embedResult.hasEmbeds) {
+            // Enhance the cleaned content with embed information
+            message.content = `${cleanContent}\n\n${embedResult.formattedContent}`;
+            message.processForEmbeds = true;
+            
+            logger.debug('Enhanced message with embed content', {
+                source: 'discord',
+                author: message.author.username,
+                channel: message.channel.name,
+                embedCount: embedResult.embedCount,
+                originalTextLength: cleanContent.length,
+                enhancedTextLength: message.content.length
+            });
+        }
 
         // Log emote filtering if emotes were found
         const emoteStats = this.emoteFilter.getEmoteStats(originalContent);
@@ -106,7 +143,10 @@ class MessageFilter {
 
         return {
             shouldProcess: true,
-            cleanedMessage: message // Return the modified original message
+            cleanedMessage: message,
+            hasImages: hasImages,
+            hasEmbeds: embedResult.hasEmbeds,
+            embedInfo: embedResult.summary
         };
     }
 
@@ -184,6 +224,14 @@ class MessageFilter {
         return {
             shouldProcess: true
         };
+    }
+
+    /**
+     * Get embed processor for external use
+     * @returns {EmbedProcessor} - The embed processor instance
+     */
+    getEmbedProcessor() {
+        return this.embedProcessor;
     }
 }
 
