@@ -6,25 +6,25 @@ class ResponseProcessor {
     this.conversationManager = conversationManager;
   }
 
-  async handleSuccessfulResponse(message, result, context) {
+  async handleSuccessfulResponse(message, result, context, decision = null) {
     // Log detailed token usage
     this.logTokenUsage(result, context, message.channel.name);
 
     // Log truncation warnings
     this.logTruncationWarnings(result, message.channel.name);
 
-    // FIXED: Use the decision's reply preference if available
-    // This ensures we reply to the exact message the bot decided about
+    // FIXED: Use the decision's action preference if available
+    // This preserves the bot's original intent (respond vs reply)
     let response;
     try {
-      const shouldUseReply = this.shouldUseReplyForMessage(message);
+      const shouldUseReply = this.shouldUseReplyForMessage(message, decision);
 
       logger.info('Reply decision made', {
         source: 'discord',
         shouldUseReply: shouldUseReply,
+        decisionAction: decision?.action || 'unknown',
         channel: message.channel.name,
-        messageId: message.id,
-        messageAge: Date.now() - message.createdTimestamp
+        messageId: message.id
       });
 
       if (shouldUseReply) {
@@ -39,7 +39,7 @@ class ResponseProcessor {
         logger.debug('Used normal send instead of reply', {
           source: 'discord',
           channel: message.channel.name,
-          reason: 'shouldUseReply_returned_false'
+          reason: 'decision_was_respond_not_reply'
         });
       }
     } catch (error) {
@@ -69,6 +69,24 @@ class ResponseProcessor {
     await storage.addActivity(activityMessage);
 
     return response;
+  }
+
+  /**
+   * Determine reply vs send based on the decision engine's choice
+   * This preserves the bot's original intent while being reliable
+   */
+  shouldUseReplyForMessage(message, decision) {
+    // If we have a decision from the decision engine, use its preference
+    if (decision && decision.action) {
+      return decision.action === 'reply';
+    }
+
+    // Fallback logic if no decision available
+    // Use reply for direct engagement, send for casual conversation
+    const messageAge = Date.now() - message.createdTimestamp;
+    const isRecent = messageAge < 60000; // 1 minute
+
+    return isRecent;
   }
 
   /**
