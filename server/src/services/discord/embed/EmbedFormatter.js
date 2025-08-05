@@ -1,7 +1,9 @@
 class EmbedFormatter {
   constructor() {
-    this.maxFieldLength = 200; // Limit field content length
-    this.maxDescriptionLength = 500; // Limit description length
+    // Configuration for text formatting - increased limits for better context
+    this.maxDescriptionLength = 800;  // Increased from 200
+    this.maxFieldLength = 400;        // Increased from 150  
+    this.maxTitleLength = 200;        // Increased from 100
   }
 
   /**
@@ -171,8 +173,8 @@ class EmbedFormatter {
    * @param {number} maxLength - Maximum length
    * @returns {string} - Truncated text
    */
-  truncateText(text, maxLength) {
-    if (!text || text.length <= maxLength) {
+  truncateText(text, maxLength, skipTruncation = false) {
+    if (!text || text.length <= maxLength || skipTruncation) {
       return text;
     }
 
