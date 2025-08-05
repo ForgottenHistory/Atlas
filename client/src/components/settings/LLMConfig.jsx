@@ -1,41 +1,44 @@
 import { useState, useEffect } from 'react';
 import { Brain, RotateCcw } from 'lucide-react';
 import { Button, Card } from '../shared';
-import LLMProviderSelector from './llm/LLMProviderSelector';
-import ModelSelector from './llm/ModelSelector';
+import ModelTabContainer from './llm/ModelTabContainer';
 import TokenManagement from './llm/TokenManagement';
 import SystemPromptConfig from './llm/SystemPromptConfig';
-import ModelParameters from './llm/ModelParameters';
-import ImageReadingConfig from './llm/ImageReadingConfig';
-import MultiModelConfig from './llm/MultiModelConfig';
 
 const LLMConfig = ({ onUpdateSettings, isSubmitting }) => {
   const [formData, setFormData] = useState({
-    provider: 'featherless', // Default to featherless
-    model: '',
-    systemPrompt: '',
-    temperature: '0.6',
-    top_p: '1',
-    top_k: '',
-    frequency_penalty: '',
-    presence_penalty: '',
-    repetition_penalty: '1',
-    min_p: '',
+    // Legacy fallback settings
     max_characters: '2000',
     context_limit: '4096',
-    api_key: '', // Add API key field for OpenRouter
-    // Multi-model settings
+    systemPrompt: '',
+    
+    // Decision model settings
     decision_provider: 'featherless',
-    decision_model: 'zai-org/GLM-4-9B-0414',
+    decision_model: '',
     decision_api_key: '',
     decision_temperature: '0.3',
+    decision_top_p: '1',
+    decision_top_k: '',
     decision_max_tokens: '200',
+    decision_frequency_penalty: '',
+    decision_presence_penalty: '',
+    decision_repetition_penalty: '1',
+    decision_min_p: '',
+    
+    // Conversation model settings
     conversation_provider: 'featherless',
-    conversation_model: 'moonshotai/Kimi-K2-Instruct',
+    conversation_model: '',
     conversation_api_key: '',
     conversation_temperature: '0.7',
+    conversation_top_p: '1',
+    conversation_top_k: '',
     conversation_max_tokens: '2000',
-    // Image reading settings
+    conversation_frequency_penalty: '',
+    conversation_presence_penalty: '',
+    conversation_repetition_penalty: '1',
+    conversation_min_p: '',
+    
+    // Image model settings
     image_provider: '',
     image_model: '',
     image_api_key: '',
@@ -54,32 +57,40 @@ const LLMConfig = ({ onUpdateSettings, isSubmitting }) => {
       
       if (result.success && result.data.llm) {
         const llmSettings = result.data.llm;
+        
         setFormData({
-          provider: llmSettings.provider || 'featherless',
-          model: llmSettings.model || '',
-          systemPrompt: llmSettings.systemPrompt || '',
-          temperature: llmSettings.temperature?.toString() || '0.6',
-          top_p: llmSettings.top_p?.toString() || '1',
-          top_k: llmSettings.top_k?.toString() || '',
-          frequency_penalty: llmSettings.frequency_penalty?.toString() || '',
-          presence_penalty: llmSettings.presence_penalty?.toString() || '',
-          repetition_penalty: llmSettings.repetition_penalty?.toString() || '1',
-          min_p: llmSettings.min_p?.toString() || '',
+          // Legacy settings
           max_characters: llmSettings.max_characters?.toString() || '2000',
           context_limit: llmSettings.context_limit?.toString() || '4096',
-          api_key: llmSettings.api_key || '',
-          // Multi-model settings
+          systemPrompt: llmSettings.systemPrompt || '',
+          
+          // Decision model settings
           decision_provider: llmSettings.decision_provider || 'featherless',
-          decision_model: llmSettings.decision_model || 'zai-org/GLM-4-9B-0414',
+          decision_model: llmSettings.decision_model || '',
           decision_api_key: llmSettings.decision_api_key || '',
           decision_temperature: llmSettings.decision_temperature?.toString() || '0.3',
+          decision_top_p: llmSettings.decision_top_p?.toString() || '1',
+          decision_top_k: llmSettings.decision_top_k?.toString() || '',
           decision_max_tokens: llmSettings.decision_max_tokens?.toString() || '200',
+          decision_frequency_penalty: llmSettings.decision_frequency_penalty?.toString() || '',
+          decision_presence_penalty: llmSettings.decision_presence_penalty?.toString() || '',
+          decision_repetition_penalty: llmSettings.decision_repetition_penalty?.toString() || '1',
+          decision_min_p: llmSettings.decision_min_p?.toString() || '',
+          
+          // Conversation model settings
           conversation_provider: llmSettings.conversation_provider || 'featherless',
-          conversation_model: llmSettings.conversation_model || 'moonshotai/Kimi-K2-Instruct',
+          conversation_model: llmSettings.conversation_model || '',
           conversation_api_key: llmSettings.conversation_api_key || '',
           conversation_temperature: llmSettings.conversation_temperature?.toString() || '0.7',
+          conversation_top_p: llmSettings.conversation_top_p?.toString() || '1',
+          conversation_top_k: llmSettings.conversation_top_k?.toString() || '',
           conversation_max_tokens: llmSettings.conversation_max_tokens?.toString() || '2000',
-          // Image reading settings
+          conversation_frequency_penalty: llmSettings.conversation_frequency_penalty?.toString() || '',
+          conversation_presence_penalty: llmSettings.conversation_presence_penalty?.toString() || '',
+          conversation_repetition_penalty: llmSettings.conversation_repetition_penalty?.toString() || '1',
+          conversation_min_p: llmSettings.conversation_min_p?.toString() || '',
+          
+          // Image model settings
           image_provider: llmSettings.image_provider || '',
           image_model: llmSettings.image_model || '',
           image_api_key: llmSettings.image_api_key || '',
@@ -99,100 +110,78 @@ const LLMConfig = ({ onUpdateSettings, isSubmitting }) => {
     }));
   };
 
-  const handleProviderChange = (provider) => {
-    // Reset model when provider changes
-    setFormData(prev => ({
-      ...prev,
-      provider: provider,
-      model: '' // Clear model selection when provider changes
-    }));
-  };
-
   const handleSubmit = async () => {
     const llmSettings = {};
     
     // Handle string values
-    if (formData.systemPrompt.trim() !== '') {
-      llmSettings.systemPrompt = formData.systemPrompt.trim();
-    }
-    
-    if (formData.model.trim() !== '') {
-      llmSettings.model = formData.model.trim();
-    }
-    
-    if (formData.provider.trim() !== '') {
-      llmSettings.provider = formData.provider.trim();
-    }
-    
-    if (formData.api_key.trim() !== '') {
-      llmSettings.api_key = formData.api_key.trim();
-    }
-    
-    // Handle multi-model settings
-    const multiModelFields = [
+    const stringFields = [
+      'systemPrompt',
       'decision_provider', 'decision_model', 'decision_api_key',
-      'conversation_provider', 'conversation_model', 'conversation_api_key'
+      'conversation_provider', 'conversation_model', 'conversation_api_key',
+      'image_provider', 'image_model', 'image_api_key'
     ];
     
-    multiModelFields.forEach(field => {
+    stringFields.forEach(field => {
       if (formData[field] && formData[field].trim() !== '') {
         llmSettings[field] = formData[field].trim();
       }
     });
     
     // Handle numeric parameters
-    Object.entries(formData).forEach(([key, value]) => {
-      if (!['systemPrompt', 'model', 'provider', 'api_key', 'decision_provider', 'decision_model', 'decision_api_key', 'conversation_provider', 'conversation_model', 'conversation_api_key', 'image_provider', 'image_model', 'image_api_key'].includes(key) && value.trim() !== '') {
-        const numValue = parseFloat(value);
+    const numericFields = [
+      'max_characters', 'context_limit',
+      'decision_temperature', 'decision_top_p', 'decision_top_k', 'decision_max_tokens',
+      'decision_frequency_penalty', 'decision_presence_penalty', 'decision_repetition_penalty', 'decision_min_p',
+      'conversation_temperature', 'conversation_top_p', 'conversation_top_k', 'conversation_max_tokens',
+      'conversation_frequency_penalty', 'conversation_presence_penalty', 'conversation_repetition_penalty', 'conversation_min_p',
+      'image_max_size', 'image_quality'
+    ];
+    
+    numericFields.forEach(field => {
+      if (formData[field] && formData[field].trim() !== '') {
+        const numValue = parseFloat(formData[field]);
         if (!isNaN(numValue)) {
-          llmSettings[key] = numValue;
+          llmSettings[field] = numValue;
         }
       }
     });
 
-    // Handle image reading string settings
-    if (formData.image_provider && formData.image_provider.trim() !== '') {
-      llmSettings.image_provider = formData.image_provider.trim();
-    }
-    
-    if (formData.image_model && formData.image_model.trim() !== '') {
-      llmSettings.image_model = formData.image_model.trim();
-    }
-    
-    if (formData.image_api_key && formData.image_api_key.trim() !== '') {
-      llmSettings.image_api_key = formData.image_api_key.trim();
-    }
-
     await onUpdateSettings({ llm: llmSettings });
+    
+    // Scroll to top of page after saving
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const resetToDefaults = () => {
     setFormData({
-      provider: 'featherless',
-      model: '',
-      systemPrompt: '',
-      temperature: '0.6',
-      top_p: '1',
-      top_k: '',
-      frequency_penalty: '',
-      presence_penalty: '',
-      repetition_penalty: '1',
-      min_p: '',
       max_characters: '2000',
       context_limit: '4096',
-      api_key: '',
-      // Multi-model defaults
+      systemPrompt: '',
+      
       decision_provider: 'featherless',
-      decision_model: 'zai-org/GLM-4-9B-0414',
+      decision_model: '',
       decision_api_key: '',
       decision_temperature: '0.3',
+      decision_top_p: '1',
+      decision_top_k: '',
       decision_max_tokens: '200',
+      decision_frequency_penalty: '',
+      decision_presence_penalty: '',
+      decision_repetition_penalty: '1',
+      decision_min_p: '',
+      
       conversation_provider: 'featherless',
-      conversation_model: 'moonshotai/Kimi-K2-Instruct',
+      conversation_model: '',
       conversation_api_key: '',
       conversation_temperature: '0.7',
+      conversation_top_p: '1',
+      conversation_top_k: '',
       conversation_max_tokens: '2000',
-      // Reset image settings
+      conversation_frequency_penalty: '',
+      conversation_presence_penalty: '',
+      conversation_repetition_penalty: '1',
+      conversation_min_p: '',
+      
       image_provider: '',
       image_model: '',
       image_api_key: '',
@@ -209,96 +198,46 @@ const LLMConfig = ({ onUpdateSettings, isSubmitting }) => {
           LLM Configuration
         </Card.Title>
         <p className="text-gray-400 text-sm mt-1">
-          Configure language model parameters and memory management
+          Configure different models for specific tasks and memory management
         </p>
       </Card.Header>
       
       <Card.Content>
         <div className="space-y-8">
           {/* Multi-Model Configuration */}
-          <MultiModelConfig
-            formData={formData}
-            onInputChange={handleInputChange}
-            isSubmitting={isSubmitting}
-          />
-
-          {/* Legacy Single Model Configuration */}
           <Card>
             <Card.Header>
-              <Card.Title>Legacy Configuration (Optional)</Card.Title>
+              <Card.Title>Multi-Model Setup</Card.Title>
               <p className="text-gray-400 text-sm mt-1">
-                Fallback settings when multi-model is not configured
+                Use specialized models optimized for different tasks
               </p>
             </Card.Header>
             <Card.Content>
-              <div className="space-y-4">
-                {/* Provider & Model Selection */}
-                <div className="space-y-4">
-                  <h4 className="text-lg font-medium text-white border-b border-gray-600 pb-2">
-                    Provider & Model Selection
-                  </h4>
-                  
-                  <LLMProviderSelector
-                    selectedProvider={formData.provider}
-                    onProviderSelect={handleProviderChange}
-                    disabled={isSubmitting}
-                  />
+              <ModelTabContainer
+                formData={formData}
+                onInputChange={handleInputChange}
+                isSubmitting={isSubmitting}
+              />
+            </Card.Content>
+          </Card>
 
-                  {/* API Key field for OpenRouter and Featherless */}
-                  {(formData.provider === 'openrouter' || formData.provider === 'featherless') && (
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-200">
-                        {formData.provider === 'openrouter' ? 'OpenRouter API Key' : 'Featherless API Key'}
-                      </label>
-                      <input
-                        type="password"
-                        value={formData.api_key}
-                        onChange={(e) => handleInputChange('api_key', e.target.value)}
-                        placeholder={`Enter your ${formData.provider === 'openrouter' ? 'OpenRouter' : 'Featherless'} API key...`}
-                        disabled={isSubmitting}
-                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
-                      />
-                      <p className="text-xs text-gray-400">
-                        {formData.provider === 'openrouter' 
-                          ? <>Get your API key from <a href="https://openrouter.ai" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300">openrouter.ai</a></>
-                          : <>Get your API key from <a href="https://featherless.ai" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300">featherless.ai</a></>
-                        }
-                      </p>
-                    </div>
-                  )}
-                  
-                  <ModelSelector
-                    provider={formData.provider}
-                    apiKey={formData.api_key}
-                    selectedModel={formData.model}
-                    onModelSelect={(modelId) => handleInputChange('model', modelId)}
-                    disabled={isSubmitting}
-                  />
-                </div>
-
-                {/* Token & Memory Management */}
+          {/* Global Settings */}
+          <Card>
+            <Card.Header>
+              <Card.Title>Global Settings</Card.Title>
+              <p className="text-gray-400 text-sm mt-1">
+                Settings applied across all models
+              </p>
+            </Card.Header>
+            <Card.Content>
+              <div className="space-y-6">
                 <TokenManagement
                   formData={formData}
                   onInputChange={handleInputChange}
                   isSubmitting={isSubmitting}
                 />
-
-                {/* System Prompt */}
+                
                 <SystemPromptConfig
-                  formData={formData}
-                  onInputChange={handleInputChange}
-                  isSubmitting={isSubmitting}
-                />
-
-                {/* Model Parameters */}
-                <ModelParameters
-                  formData={formData}
-                  onInputChange={handleInputChange}
-                  isSubmitting={isSubmitting}
-                />
-
-                {/* Image Reading Configuration */}
-                <ImageReadingConfig
                   formData={formData}
                   onInputChange={handleInputChange}
                   isSubmitting={isSubmitting}

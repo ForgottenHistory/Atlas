@@ -1,0 +1,274 @@
+import { Settings } from 'lucide-react';
+import { Input } from '../../shared';
+
+const ModelSpecificConfig = ({ 
+  type, // 'decision', 'conversation', or 'image'
+  formData, 
+  onInputChange, 
+  isSubmitting 
+}) => {
+  const getFieldName = (field) => `${type}_${field}`;
+  const getValue = (field) => formData[getFieldName(field)] || '';
+
+  const handleChange = (field, value) => {
+    onInputChange(getFieldName(field), value);
+  };
+
+  const validateRange = (value, min, max, allowEmpty = true) => {
+    if (allowEmpty && value === '') return true;
+    const num = parseFloat(value);
+    return !isNaN(num) && num >= min && num <= max;
+  };
+
+  const getInputError = (field, value) => {
+    switch (field) {
+      case 'temperature':
+        return !validateRange(value, 0, 2, false) ? 'Must be between 0 and 2' : null;
+      case 'top_p':
+        return !validateRange(value, 0.01, 1, false) ? 'Must be between 0.01 and 1' : null;
+      case 'top_k':
+        const topK = parseInt(value);
+        return value !== '' && (isNaN(topK) || topK < -1) ? 'Must be -1 or positive integer' : null;
+      case 'frequency_penalty':
+        return !validateRange(value, -2, 2) ? 'Must be between -2 and 2' : null;
+      case 'presence_penalty':
+        return !validateRange(value, -2, 2) ? 'Must be between -2 and 2' : null;
+      case 'repetition_penalty':
+        return !validateRange(value, 0.1, 2, false) ? 'Must be between 0.1 and 2' : null;
+      case 'min_p':
+        return !validateRange(value, 0, 1) ? 'Must be between 0 and 1' : null;
+      default:
+        return null;
+    }
+  };
+
+  // Don't show parameters for image models
+  if (type === 'image') {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 mb-4">
+          <Settings className="h-4 w-4" />
+          <h5 className="text-md font-medium text-gray-200">Image Processing Settings</h5>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Input
+            name={getFieldName('max_size')}
+            type="number"
+            step="0.1"
+            min="0.5"
+            max="20"
+            label="Max Image Size (MB)"
+            value={getValue('max_size') || '5'}
+            onChange={(e) => handleChange('max_size', e.target.value)}
+            placeholder="5"
+            disabled={isSubmitting}
+            helperText="Maximum image file size to process"
+          />
+
+          <Input
+            name={getFieldName('quality')}
+            type="range"
+            min="1"
+            max="3"
+            step="1"
+            label={`Quality: ${
+              getValue('quality') === '1' ? 'Low (Fast)' :
+              getValue('quality') === '2' ? 'Medium' :
+              getValue('quality') === '3' ? 'High (Detailed)' :
+              'Medium'
+            }`}
+            value={getValue('quality') || '2'}
+            onChange={(e) => handleChange('quality', e.target.value)}
+            disabled={isSubmitting}
+            helperText="Processing quality vs speed tradeoff"
+          />
+        </div>
+      </div>
+    );
+  }
+
+  const getDefaultTemperature = () => {
+    return type === 'decision' ? '0.3' : '0.7';
+  };
+
+  const getDefaultMaxTokens = () => {
+    return type === 'decision' ? '200' : '2000';
+  };
+
+  const getTemperatureHelper = () => {
+    return type === 'decision' 
+      ? 'Lower for consistent decisions' 
+      : 'Higher for creative responses';
+  };
+
+  const getMaxTokensHelper = () => {
+    return type === 'decision' 
+      ? 'Short decisions only' 
+      : 'Full conversation responses';
+  };
+
+  const coreParameters = [
+    {
+      name: 'temperature',
+      label: 'Temperature',
+      placeholder: getDefaultTemperature(),
+      required: true,
+      step: '0.1',
+      min: '0',
+      max: '2',
+      helpText: 'Controls randomness: 0 = deterministic, 2 = very random'
+    },
+    {
+      name: 'top_p',
+      label: 'Top P (Nucleus Sampling)',
+      placeholder: '1',
+      required: true,
+      step: '0.01',
+      min: '0.01',
+      max: '1',
+      helpText: 'Cumulative probability cutoff for token selection'
+    },
+    {
+      name: 'max_tokens',
+      label: 'Max Tokens',
+      placeholder: getDefaultMaxTokens(),
+      step: '1',
+      min: '50',
+      max: type === 'decision' ? '500' : '4000',
+      helpText: getMaxTokensHelper()
+    }
+  ];
+
+  const advancedParameters = [
+    {
+      name: 'top_k',
+      label: 'Top K',
+      placeholder: 'Leave empty or -1 for all tokens',
+      step: '1',
+      helpText: 'Limits selection to top K tokens (-1 = no limit)'
+    },
+    {
+      name: 'repetition_penalty',
+      label: 'Repetition Penalty',
+      placeholder: '1',
+      required: true,
+      step: '0.1',
+      min: '0.1',
+      max: '2',
+      helpText: '>1 reduces repetition, <1 encourages it'
+    },
+    {
+      name: 'frequency_penalty',
+      label: 'Frequency Penalty',
+      placeholder: 'Leave empty for default',
+      step: '0.1',
+      min: '-2',
+      max: '2',
+      helpText: 'Penalizes frequent tokens (OpenAI-style models)'
+    },
+    {
+      name: 'presence_penalty',
+      label: 'Presence Penalty',
+      placeholder: 'Leave empty for default',
+      step: '0.1',
+      min: '-2',
+      max: '2',
+      helpText: 'Penalizes any token that appeared (OpenAI-style models)'
+    },
+    {
+      name: 'min_p',
+      label: 'Min P',
+      placeholder: 'Leave empty or 0 to disable',
+      step: '0.01',
+      min: '0',
+      max: '1',
+      helpText: 'Minimum probability relative to most likely token'
+    }
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-2">
+        <Settings className="h-4 w-4" />
+        <h5 className="text-md font-medium text-gray-200">Model Parameters</h5>
+      </div>
+
+      {/* Core Parameters */}
+      <div className="space-y-4">
+        <h6 className="text-sm font-medium text-gray-300">Core Parameters</h6>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {coreParameters.map((param) => (
+            <Input
+              key={param.name}
+              name={getFieldName(param.name)}
+              type="number"
+              step={param.step}
+              min={param.min}
+              max={param.max}
+              label={param.label}
+              value={getValue(param.name)}
+              onChange={(e) => handleChange(param.name, e.target.value)}
+              placeholder={param.placeholder}
+              disabled={isSubmitting}
+              required={param.required}
+              error={getInputError(param.name, getValue(param.name))}
+              helperText={param.helpText}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Advanced Parameters */}
+      <div className="space-y-4">
+        <h6 className="text-sm font-medium text-gray-300">Advanced Parameters</h6>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {advancedParameters.map((param) => (
+            <Input
+              key={param.name}
+              name={getFieldName(param.name)}
+              type="number"
+              step={param.step}
+              min={param.min}
+              max={param.max}
+              label={param.label}
+              value={getValue(param.name)}
+              onChange={(e) => handleChange(param.name, e.target.value)}
+              placeholder={param.placeholder}
+              disabled={isSubmitting}
+              required={param.required}
+              error={getInputError(param.name, getValue(param.name))}
+              helperText={param.helpText}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Recommendations */}
+      <div className="bg-gray-700 bg-opacity-50 rounded-lg p-4">
+        <h6 className="text-sm font-medium text-gray-200 mb-2">
+          💡 Parameter Tips for {type.charAt(0).toUpperCase() + type.slice(1)}
+        </h6>
+        <div className="text-xs text-gray-400 space-y-1">
+          {type === 'decision' && (
+            <>
+              <div>• Temperature 0.3 for consistent decisions</div>
+              <div>• Max tokens 200 for quick responses</div>
+              <div>• Repetition penalty 1.1 to avoid loops</div>
+            </>
+          )}
+          {type === 'conversation' && (
+            <>
+              <div>• Temperature 0.6-0.8 for balanced responses</div>
+              <div>• Max tokens 2000 for full conversations</div>
+              <div>• Repetition penalty 1.1-1.2 usually works well</div>
+            </>
+          )}
+          <div>• Empty advanced parameters will use model defaults</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default ModelSpecificConfig;
