@@ -112,152 +112,133 @@ const VALIDATION_RULES = {
  * @param {Object} settings - LLM settings to validate
  * @returns {Object} - { error?: string, settings?: Object }
  */
-function validateLLMSettings(llmSettings) {
+const validateLLMSettings = (settings) => {
   const errors = [];
-  const validatedSettings = {};
   
-  console.log('Validating LLM settings:', llmSettings);
-  
-  // Validate provider (string)
-  if (llmSettings.provider !== undefined) {
-    if (typeof llmSettings.provider === 'string') {
-      validatedSettings.provider = llmSettings.provider.trim();
-    } else {
-      errors.push('Provider must be a string');
-    }
+  if (!settings || typeof settings !== 'object') {
+    errors.push('LLM settings must be an object');
+    return errors;
   }
-  
-  // Validate API key (string)
-  if (llmSettings.api_key !== undefined) {
-    if (typeof llmSettings.api_key === 'string') {
-      // Only store non-empty values
-      if (llmSettings.api_key.trim() !== '') {
-        validatedSettings.api_key = llmSettings.api_key.trim();
-      }
-    } else {
-      errors.push('API key must be a string');
-    }
+
+  // Legacy single-model validation
+  if (settings.provider && typeof settings.provider !== 'string') {
+    errors.push('Provider must be a string');
   }
-  
-  // Validate model (string)
-  if (llmSettings.model !== undefined) {
-    if (typeof llmSettings.model === 'string') {
-      validatedSettings.model = llmSettings.model.trim();
-    } else {
-      errors.push('Model must be a string');
-    }
+
+  if (settings.model && typeof settings.model !== 'string') {
+    errors.push('Model must be a string');
   }
-  
-  // Validate system prompt (string)
-  if (llmSettings.systemPrompt !== undefined) {
-    if (typeof llmSettings.systemPrompt === 'string') {
-      validatedSettings.systemPrompt = llmSettings.systemPrompt;
-    } else {
-      errors.push('System prompt must be a string');
-    }
+
+  if (settings.api_key && typeof settings.api_key !== 'string') {
+    errors.push('API key must be a string');
   }
-  
-  // Get context limit based on provider
-  const getContextLimits = (provider) => {
-    switch (provider) {
-      case 'openrouter':
-        return { min: 512, max: 1000000 }; // OpenRouter supports very large contexts
-      case 'featherless':
-      default:
-        return { min: 512, max: 32768 }; // Conservative default
+
+  // Multi-model validation
+  const multiModelFields = [
+    'decision_provider', 'decision_model', 'decision_api_key',
+    'conversation_provider', 'conversation_model', 'conversation_api_key'
+  ];
+
+  multiModelFields.forEach(field => {
+    if (settings[field] !== undefined && typeof settings[field] !== 'string') {
+      errors.push(`${field} must be a string`);
     }
-  };
-  
-  const contextLimits = getContextLimits(validatedSettings.provider || llmSettings.provider);
-  
-  // Validate numeric parameters
+  });
+
+  // Numeric parameter validation
   const numericFields = {
-    temperature: { min: 0, max: 2, required: false },
-    top_p: { min: 0.01, max: 1, required: false },
-    top_k: { min: -1, max: 1000, required: false, integer: true },
-    frequency_penalty: { min: -2, max: 2, required: false },
-    presence_penalty: { min: -2, max: 2, required: false },
-    repetition_penalty: { min: 0.1, max: 2, required: false },
-    min_p: { min: 0, max: 1, required: false },
-    max_tokens: { min: 1, max: 8192, required: false, integer: true },
-    max_characters: { min: 50, max: 4000, required: false, integer: true },
-    context_limit: { min: contextLimits.min, max: contextLimits.max, required: false, integer: true },
-    image_max_size: { min: 0.1, max: 50, required: false },
-    image_quality: { min: 1, max: 3, required: false, integer: true }
+    temperature: { min: 0, max: 2 },
+    decision_temperature: { min: 0, max: 2 },
+    conversation_temperature: { min: 0, max: 2 },
+    top_p: { min: 0.01, max: 1 },
+    top_k: { min: 1, max: 100, optional: true },
+    frequency_penalty: { min: -2, max: 2, optional: true },
+    presence_penalty: { min: -2, max: 2, optional: true },
+    repetition_penalty: { min: 0.1, max: 2 },
+    min_p: { min: 0, max: 1, optional: true },
+    max_characters: { min: 50, max: 4000 },
+    context_limit: { min: 512, max: 1000000 },
+    max_tokens: { min: 1, max: 4000, optional: true },
+    decision_max_tokens: { min: 50, max: 500 },
+    conversation_max_tokens: { min: 100, max: 4000 },
+    image_max_size: { min: 0.5, max: 20 },
+    image_quality: { min: 1, max: 3 }
   };
-  
-  for (const [field, config] of Object.entries(numericFields)) {
-    if (llmSettings[field] !== undefined) {
-      const value = llmSettings[field];
-      
-      // Allow empty strings (will be ignored)
-      if (value === '' || value === null) {
-        continue;
-      }
-      
-      const numValue = config.integer ? parseInt(value) : parseFloat(value);
+
+  Object.entries(numericFields).forEach(([field, validation]) => {
+    const value = settings[field];
+    
+    if (value !== undefined) {
+      const numValue = parseFloat(value);
       
       if (isNaN(numValue)) {
-        errors.push(`${field} must be a number`);
-        continue;
+        errors.push(`${field} must be a valid number`);
+      } else if (numValue < validation.min || numValue > validation.max) {
+        errors.push(`${field} must be between ${validation.min} and ${validation.max}`);
       }
-      
-      if (numValue < config.min || numValue > config.max) {
-        errors.push(`${field} must be between ${config.min} and ${config.max}`);
-        continue;
-      }
-      
-      validatedSettings[field] = numValue;
+    } else if (!validation.optional && value !== undefined) {
+      // Only validate if the field is explicitly provided
     }
-  }
-
-  // Validate image reading string settings
-  const imageStringFields = {
-    image_provider: { enum: ['', 'openrouter', 'anthropic', 'openai'] },
-    image_model: { maxLength: 200 },
-    image_api_key: { maxLength: 500 }
-  };
-
-  for (const [field, config] of Object.entries(imageStringFields)) {
-    if (llmSettings[field] !== undefined) {
-      const value = llmSettings[field];
-
-      if (typeof value !== 'string') {
-        errors.push(`${field} must be a string`);
-        continue;
-      }
-
-      if (config.enum && !config.enum.includes(value)) {
-        errors.push(`${field} must be one of: ${config.enum.join(', ')}`);
-        continue;
-      }
-
-      if (config.maxLength && value.length > config.maxLength) {
-        errors.push(`${field} must be under ${config.maxLength} characters`);
-        continue;
-      }
-
-      // Only store non-empty values
-      if (value.trim() !== '') {
-        validatedSettings[field] = value.trim();
-      }
-    }
-  }
-  
-  console.log('Validation results:', { 
-    errors, 
-    validatedSettings,
-    hasErrors: errors.length > 0 
   });
+
+  // String length validation
+  if (settings.systemPrompt && settings.systemPrompt.length > 10000) {
+    errors.push('System prompt must be less than 10,000 characters');
+  }
+
+  // Image settings validation
+  const imageFields = ['image_provider', 'image_model', 'image_api_key'];
+  imageFields.forEach(field => {
+    if (settings[field] !== undefined && typeof settings[field] !== 'string') {
+      errors.push(`${field} must be a string`);
+    }
+  });
+
+  // Provider-specific validation
+  if (settings.provider === 'openrouter' && settings.api_key && !settings.api_key.startsWith('sk-or-')) {
+    errors.push('OpenRouter API key should start with "sk-or-"');
+  }
+
+  if (settings.decision_provider === 'openrouter' && settings.decision_api_key && !settings.decision_api_key.startsWith('sk-or-')) {
+    errors.push('Decision model OpenRouter API key should start with "sk-or-"');
+  }
+
+  if (settings.conversation_provider === 'openrouter' && settings.conversation_api_key && !settings.conversation_api_key.startsWith('sk-or-')) {
+    errors.push('Conversation model OpenRouter API key should start with "sk-or-"');
+  }
+
+  return errors;
+};
+
+const sanitizeLLMSettings = (settings) => {
+  const sanitized = { ...settings };
   
-  return {
-    error: errors.length > 0 ? errors.join(', ') : null,
-    settings: validatedSettings
-  };
-}
+  // Remove empty strings and convert numbers
+  Object.keys(sanitized).forEach(key => {
+    if (typeof sanitized[key] === 'string' && sanitized[key].trim() === '') {
+      delete sanitized[key];
+    } else if (typeof sanitized[key] === 'string' && !isNaN(parseFloat(sanitized[key]))) {
+      // Convert numeric strings to numbers for numeric fields
+      const numericFields = [
+        'temperature', 'decision_temperature', 'conversation_temperature',
+        'top_p', 'top_k', 'frequency_penalty', 'presence_penalty', 
+        'repetition_penalty', 'min_p', 'max_characters', 'context_limit',
+        'max_tokens', 'decision_max_tokens', 'conversation_max_tokens',
+        'image_max_size', 'image_quality'
+      ];
+      
+      if (numericFields.includes(key)) {
+        sanitized[key] = parseFloat(sanitized[key]);
+      }
+    }
+  });
+
+  return sanitized;
+};
 
 module.exports = {
   validateLLMSettings,
   getDefaultLLMSettings,
+  sanitizeLLMSettings,
   VALIDATION_RULES
 };

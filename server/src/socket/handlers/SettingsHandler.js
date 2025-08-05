@@ -1,4 +1,4 @@
-const { validateLLMSettings } = require('../../routes/settings/validators/llmValidator');
+const { validateLLMSettings, sanitizeLLMSettings } = require('../../routes/settings/validators/llmValidator');
 
 class SettingsHandler {
   constructor(io, storage, discordService) {
@@ -45,10 +45,26 @@ class SettingsHandler {
           await this._handleBotRestart(updates.botToken);
         }
         
-        socket.emit('settingsUpdated', { success: true });
+        // Prepare response
+        const response = {
+          success: true,
+          message: 'Settings updated successfully',
+          timestamp: new Date().toISOString()
+        };
+        
+        socket.emit('settingsUpdated', response);
         this.io.emit('newActivity', activity);
         
-        console.log('Settings successfully saved');
+        // Broadcast settings update to all clients
+        if (Object.keys(llmUpdates).length > 0) {
+          this.io.emit('settingsUpdated', {
+            type: 'llm',
+            settings: llmUpdates,
+            timestamp: response.timestamp
+          });
+        }
+        
+        console.log('Settings successfully saved and broadcasted');
       } else {
         console.error('Failed to save settings to storage');
         socket.emit('settingsUpdated', { success: false, error: 'Failed to save settings' });
@@ -80,23 +96,40 @@ class SettingsHandler {
       }
     }
 
-    // Handle LLM settings - this is the key fix!
+    // Handle LLM settings with proper validation
     if (settingsData.llm && typeof settingsData.llm === 'object') {
-      console.log('Processing LLM settings:', settingsData.llm);
+      console.log('Processing LLM settings:', {
+        fields: Object.keys(settingsData.llm),
+        hasDecisionModel: !!settingsData.llm.decision_model,
+        hasConversationModel: !!settingsData.llm.conversation_model
+      });
       
-      const llmValidation = validateLLMSettings(settingsData.llm);
+      // Validate LLM settings using the proper validator
+      const validationErrors = validateLLMSettings(settingsData.llm);
       
-      if (llmValidation.error) {
+      if (validationErrors.length > 0) {
+        console.log('LLM validation failed:', validationErrors);
         return { 
-          error: `LLM validation errors: ${llmValidation.error}` 
+          error: `LLM validation errors: ${validationErrors.join(', ')}` 
         };
       }
       
-      // Store LLM settings separately
-      Object.assign(llmUpdates, llmValidation.settings);
-      updated.push('LLM configuration');
+      console.log('LLM settings validation passed');
       
-      console.log('Validated LLM settings:', llmValidation.settings);
+      // Sanitize the LLM settings
+      const sanitizedLLMSettings = sanitizeLLMSettings(settingsData.llm);
+      
+      console.log('Validated LLM settings:', {
+        fieldsCount: Object.keys(sanitizedLLMSettings).length,
+        hasDecisionProvider: !!sanitizedLLMSettings.decision_provider,
+        hasConversationProvider: !!sanitizedLLMSettings.conversation_provider,
+        decisionTemp: sanitizedLLMSettings.decision_temperature,
+        conversationTemp: sanitizedLLMSettings.conversation_temperature
+      });
+      
+      // Store sanitized LLM settings
+      Object.assign(llmUpdates, sanitizedLLMSettings);
+      updated.push('LLM configuration');
     }
 
     return { updates, llmUpdates, updated, needsBotRestart };
