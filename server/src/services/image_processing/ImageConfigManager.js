@@ -2,6 +2,7 @@ const storage = require('../../utils/storage');
 
 class ImageConfigManager {
   getImageSettings() {
+    // FIX: Use main settings instead of separate LLM settings
     const settings = storage.getSettings();
     const llmSettings = settings.llm || {};
 
@@ -64,16 +65,6 @@ class ImageConfigManager {
     }
 
     return true;
-  }
-
-  getDefaultSettings() {
-    return {
-      provider: '',
-      model: '',
-      apiKey: '',
-      maxSize: 5,
-      quality: 2
-    };
   }
 }
 

@@ -159,7 +159,8 @@ class MessageProcessor {
       const imageSettings = {
         provider: llmSettings.image_provider,
         model: llmSettings.image_model,
-        apiKey: llmSettings.image_api_key,
+        apiKey: llmSettings.image_api_key,    // For ImageAnalyzer
+        api_key: llmSettings.image_api_key,   // For provider validation
         maxSize: llmSettings.image_max_size || 5,
         quality: llmSettings.image_quality || 2
       };
@@ -173,7 +174,7 @@ class MessageProcessor {
         model: imageSettings.model
       });
 
-      const imageResults = await this.imageProcessor.analyzeMessageImages(message, imageSettings);
+      const imageResults = await this.imageProcessor.processMessageImages(message, imageSettings);
 
       if (imageResults && imageResults.length > 0) {
         message.imageAnalysis = imageResults;
