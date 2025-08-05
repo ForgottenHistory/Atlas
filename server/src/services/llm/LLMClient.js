@@ -27,16 +27,6 @@ class LLMClient {
   }
 
   async generateResponse(prompt, settings = {}) {
-    // DEBUG: Log exactly what settings are being passed
-    console.log('LLMClient.generateResponse called with:', {
-      promptLength: prompt.length,
-      settingsProvider: settings.provider,
-      settingsApiKey: settings.api_key ? 'PRESENT' : 'MISSING',
-      settingsModel: settings.model,
-      currentProvider: this.currentProvider,
-      allSettingsKeys: Object.keys(settings)
-    });
-
     // Use provider from settings if provided, otherwise use current provider
     const providerName = settings.provider || this.currentProvider;
     const provider = this.providers.get(providerName);
@@ -52,9 +42,14 @@ class LLMClient {
       throw new Error('OpenRouter API key required in settings');
     }
 
-    // For Featherless, validate it has the env var API key
-    if (providerName === 'featherless' && !provider.isAvailable()) {
-      throw new Error('Featherless API key not configured in environment variables');
+    // For Featherless, check if we have API key in settings or environment
+    if (providerName === 'featherless') {
+      const hasEnvKey = process.env.FEATHERLESS_API_KEY;
+      const hasSettingsKey = settings.api_key;
+
+      if (!hasEnvKey && !hasSettingsKey) {
+        throw new Error('Featherless API key required - please provide in settings or environment variables');
+      }
     }
 
     // Validate settings for the provider - only if provider has validation

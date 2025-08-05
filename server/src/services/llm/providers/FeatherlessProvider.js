@@ -8,7 +8,7 @@ class FeatherlessProvider {
     this.defaultModel = 'moonshotai/Kimi-K2-Instruct';
     this.maxTokens = 16384;
     this.availableModels = null;
-    
+
     if (this.client) {
       logger.success('Featherless provider initialized', {
         source: 'llm',
@@ -17,18 +17,18 @@ class FeatherlessProvider {
         maxTokens: this.maxTokens
       });
     } else {
-      logger.error('Featherless provider failed to initialize', {
+      logger.warn('Featherless provider initialized without environment API key', {
         source: 'llm',
         provider: this.name,
-        reason: 'Missing API key'
+        note: 'Will use API key from settings when provided'
       });
     }
   }
 
-  createClient() {
-    const apiKey = process.env.FEATHERLESS_API_KEY;
-    if (!apiKey) {
-      logger.error('FEATHERLESS_API_KEY not found in environment variables', {
+  createClient(apiKey = null) {
+    const key = apiKey || process.env.FEATHERLESS_API_KEY;
+    if (!key) {
+      logger.debug('No API key available for Featherless client creation', {
         source: 'llm',
         provider: this.name
       });
@@ -37,13 +37,14 @@ class FeatherlessProvider {
 
     return new OpenAI({
       baseURL: 'https://api.featherless.ai/v1',
-      apiKey: apiKey,
+      apiKey: key,
     });
   }
 
-  async fetchAvailableModels() {
-    if (!this.client) {
-      throw new Error('Featherless client not initialized - check API key');
+  async fetchAvailableModels(apiKey = null) {
+    const key = apiKey || process.env.FEATHERLESS_API_KEY;
+    if (!key) {
+      throw new Error('Featherless API key required - check settings or environment variables');
     }
 
     try {
@@ -54,7 +55,7 @@ class FeatherlessProvider {
 
       const response = await fetch('https://api.featherless.ai/v1/models', {
         headers: {
-          'Authorization': `Bearer ${process.env.FEATHERLESS_API_KEY}`
+          'Authorization': `Bearer ${key}`
         }
       });
 
@@ -65,13 +66,13 @@ class FeatherlessProvider {
       const data = await response.json();
       if (data.data && Array.isArray(data.data)) {
         this.availableModels = data.data;
-        
+
         logger.info('Successfully fetched available models', {
           source: 'llm',
           provider: this.name,
           modelCount: data.data.length
         });
-        
+
         return data.data;
       } else {
         throw new Error('Invalid response format from models API');
@@ -87,8 +88,17 @@ class FeatherlessProvider {
   }
 
   async generateResponse(prompt, settings = {}) {
-    if (!this.client) {
-      throw new Error('Featherless client not initialized - check API key');
+    // Use API key from settings if provided, otherwise fallback to environment variable
+    const apiKey = settings.api_key || process.env.FEATHERLESS_API_KEY;
+
+    if (!apiKey) {
+      throw new Error('Featherless API key required - please provide in settings or environment variables');
+    }
+
+    // Create client with the appropriate API key
+    const client = this.createClient(apiKey);
+    if (!client) {
+      throw new Error('Failed to create Featherless client');
     }
 
     // Determine which model to use
@@ -108,7 +118,7 @@ class FeatherlessProvider {
       });
 
       const startTime = Date.now();
-      const response = await this.client.chat.completions.create({
+      const response = await client.chat.completions.create({
         model: modelToUse,
         max_tokens: Math.min(settings.max_tokens || 512, this.maxTokens),
         temperature: settings.temperature || 0.6,
@@ -154,7 +164,7 @@ class FeatherlessProvider {
     }
 
     const firstChoice = response.choices[0];
-    
+
     // Featherless returns text completion format
     if (firstChoice.text !== undefined) {
       logger.debug('Successfully extracted content from Featherless', {
@@ -165,7 +175,7 @@ class FeatherlessProvider {
       });
       return firstChoice.text;
     }
-    
+
     // Fallback for chat completion format
     if (firstChoice.message && firstChoice.message.content !== undefined) {
       logger.debug('Extracted content using chat completion format', {
@@ -185,7 +195,8 @@ class FeatherlessProvider {
   }
 
   isAvailable() {
-    return this.client !== null;
+    // Available if we have environment API key OR if settings can provide one
+    return this.client !== null || process.env.FEATHERLESS_API_KEY || true;
   }
 
   getInfo() {
@@ -194,26 +205,26 @@ class FeatherlessProvider {
       displayName: 'Featherless AI',
       maxTokens: this.maxTokens,
       defaultModel: this.defaultModel,
-      supportedParams: ['model', 'temperature', 'top_p', 'max_tokens'],
+      supportedParams: ['model', 'temperature', 'top_p', 'max_tokens', 'api_key'],
       responseFormat: 'text_completion'
     };
   }
 
   validateSettings(settings) {
     const errors = [];
-    
+
     if (settings.temperature !== undefined) {
       if (settings.temperature < 0 || settings.temperature > 2) {
         errors.push('Temperature must be between 0 and 2');
       }
     }
-    
+
     if (settings.top_p !== undefined) {
       if (settings.top_p < 0.01 || settings.top_p > 1) {
         errors.push('Top P must be between 0.01 and 1');
       }
     }
-    
+
     if (settings.max_tokens !== undefined) {
       if (settings.max_tokens < 1 || settings.max_tokens > this.maxTokens) {
         errors.push(`Max tokens must be between 1 and ${this.maxTokens}`);
@@ -234,7 +245,7 @@ class FeatherlessProvider {
         providedSettings: settings
       });
     }
-    
+
     return errors;
   }
 }
