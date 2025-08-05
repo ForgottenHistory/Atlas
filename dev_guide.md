@@ -176,9 +176,9 @@ const context = {
 ## Key Architectural Decisions
 
 ### 1. Autonomous Decision Making
-- Bot analyzes each message and decides whether to engage
+- Bot analyzes messages and decides whether to engage
 - Uses LLM for decision-making, not just response generation  
-- Considers conversation flow, timing, and social context
+- LLMs for decision is very good at conversation flow, timing, and social context
 
 ### 2. Multi-Modal Processing
 - Text and image analysis integrated
@@ -209,11 +209,6 @@ const context = {
 3. Register in ActionRouter
 4. Update decision prompts to include new action
 
-### Adding New Image Processing
-1. Extend ImageProcessor with new analysis types
-2. Add configuration options in ImageConfigManager
-3. Update prompts in ImagePromptBuilder
-
 ## Development Workflow
 
 ### Making Changes
@@ -221,18 +216,6 @@ const context = {
 2. **Small Increments**: Change one small thing at a time
 3. **Test Immediately**: Verify before moving to next change
 4. **Context Preservation**: Keep related changes together
-
-### File Management
-- Always specify full file paths
-- Clearly indicate: ADD, REPLACE, REMOVE, NEW FILE
-- Keep files under 300 lines when possible
-- Use artifacts for easy copy-paste
-
-### Testing Strategy
-- Test in isolation first (single components)
-- Integration testing with real Discord messages
-- Monitor queue performance under load
-- Validate decision-making quality
 
 ## Common Pitfalls
 
@@ -255,20 +238,3 @@ const context = {
 - Don't let single failures crash the entire bot
 - Graceful degradation when services are unavailable
 - Clear error messages for debugging
-
-## Future Considerations
-
-### Scalability
-- Horizontal scaling with multiple bot instances
-- Distributed queue management
-- Database migration from JSON storage
-
-### Advanced Features
-- Learning from conversation patterns
-- Personality adaptation over time
-- Multi-server personality variations
-
-### Performance Optimization
-- Response caching for similar contexts
-- Predictive queueing based on activity patterns
-- Intelligent model selection based on request complexity
