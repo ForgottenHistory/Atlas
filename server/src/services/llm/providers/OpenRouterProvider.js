@@ -396,7 +396,8 @@ class OpenRouterProvider {
   validateSettings(settings) {
     const errors = [];
 
-    if (!settings.apiKey || settings.apiKey.trim() === '') {
+    // Fix: Use api_key (underscore) instead of apiKey (camelCase)
+    if (!settings.api_key || settings.api_key.trim() === '') {
       errors.push('API key is required');
     }
 
@@ -404,9 +405,10 @@ class OpenRouterProvider {
       errors.push('Model selection is required');
     }
 
-    if (settings.maxTokens !== undefined) {
-      if (settings.maxTokens < 1 || settings.maxTokens > 4000) {
-        errors.push('Max tokens must be between 1 and 4000');
+    // Fix: Use max_tokens (underscore) instead of maxTokens (camelCase)
+    if (settings.max_tokens !== undefined) {
+      if (settings.max_tokens < 1 || settings.max_tokens > 200000) { // Also increased limit for OpenRouter
+        errors.push('Max tokens must be between 1 and 200000');
       }
     }
 
@@ -417,6 +419,120 @@ class OpenRouterProvider {
     }
 
     return errors;
+  }
+
+  async generateResponse(prompt, settings = {}) {
+    const apiKey = settings.api_key;
+
+    if (!apiKey) {
+      throw new Error('OpenRouter API key not provided');
+    }
+
+    const modelToUse = settings.model || 'anthropic/claude-3-haiku';
+
+    try {
+      logger.debug('Making OpenRouter text generation API call', {
+        source: 'llm',
+        provider: this.name,
+        model: modelToUse,
+        promptLength: prompt.length,
+        settings: {
+          temperature: settings.temperature || 0.6,
+          top_p: settings.top_p || 1,
+          max_tokens: Math.min(settings.max_tokens || 512, 200000)
+        }
+      });
+
+      const requestBody = {
+        model: modelToUse,
+        messages: [
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: Math.min(settings.max_tokens || 512, 200000),
+        temperature: settings.temperature || 0.6,
+        top_p: settings.top_p || 1
+      };
+
+      // Add optional parameters if provided
+      if (settings.frequency_penalty !== undefined) {
+        requestBody.frequency_penalty = settings.frequency_penalty;
+      }
+      if (settings.presence_penalty !== undefined) {
+        requestBody.presence_penalty = settings.presence_penalty;
+      }
+
+      const startTime = Date.now();
+      const response = await fetch(`${this.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://atlas-bot.local',
+          'X-Title': 'Atlas Discord Bot'
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      const apiTime = Date.now() - startTime;
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`OpenRouter API error ${response.status}: ${errorData.error?.message || response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      logger.info('OpenRouter text generation API call completed', {
+        source: 'llm',
+        provider: this.name,
+        model: modelToUse,
+        apiTime: `${apiTime}ms`,
+        usage: data.usage || 'not provided'
+      });
+
+      return this.extractTextContent(data);
+    } catch (error) {
+      logger.error('OpenRouter text generation API error', {
+        source: 'llm',
+        provider: this.name,
+        model: modelToUse,
+        error: error.message
+      });
+      throw new Error(`OpenRouter text generation failed: ${error.message}`);
+    }
+  }
+
+  extractTextContent(response) {
+    if (!response || !response.choices || response.choices.length === 0) {
+      logger.error('Invalid API response structure', {
+        source: 'llm',
+        provider: this.name,
+        hasResponse: !!response,
+        hasChoices: !!(response && response.choices),
+        choicesLength: response?.choices?.length || 0
+      });
+      throw new Error('No response choices returned from API');
+    }
+
+    const firstChoice = response.choices[0];
+
+    // OpenRouter returns chat completion format
+    if (firstChoice.message && firstChoice.message.content !== undefined) {
+      logger.debug('Successfully extracted content from OpenRouter', {
+        source: 'llm',
+        provider: this.name,
+        contentLength: firstChoice.message.content.length,
+        finishReason: firstChoice.finish_reason
+      });
+      return firstChoice.message.content;
+    }
+
+    logger.error('No content found in API response choice', {
+      source: 'llm',
+      provider: this.name,
+      choiceStructure: Object.keys(firstChoice)
+    });
+    throw new Error('No content found in API response');
   }
 }
 

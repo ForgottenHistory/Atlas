@@ -4,7 +4,8 @@ class ResponseContextBuilder {
   buildContext(message, conversationManager) {
     const settings = storage.getSettings();
     const persona = storage.getPersona();
-    const llmSettings = storage.getLLMSettings();
+    // FIX: Get LLM settings from main settings object, not separate method
+    const llmSettings = settings.llm || {};
     const conversationHistory = conversationManager.getHistory(message.channel.id);
 
     return {
@@ -37,7 +38,7 @@ class ResponseContextBuilder {
   buildCustomContext(overrides = {}) {
     const settings = storage.getSettings();
     const persona = storage.getPersona();
-    const llmSettings = storage.getLLMSettings();
+    const llmSettings = settings.llm || {};
 
     return {
       systemPrompt: llmSettings.systemPrompt || settings.systemPrompt,

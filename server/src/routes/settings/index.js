@@ -9,14 +9,14 @@ router.get('/', async (req, res) => {
   try {
     await storage.init();
     const settings = storage.getSettings();
-    
+
     // Don't send the actual bot token for security
     const safeSettings = {
       ...settings,
       hasBotToken: !!settings.botToken,
       botToken: undefined
     };
-    
+
     res.json({
       success: true,
       data: safeSettings
@@ -34,16 +34,16 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     await storage.init();
-    
+
     const updates = {};
     let updated = [];
-    
+
     // Handle bot token
     if (req.body.botToken !== undefined) {
       updates.botToken = req.body.botToken.trim();
       updated.push('bot token');
     }
-    
+
     // Handle command prefix
     if (req.body.commandPrefix !== undefined) {
       if (req.body.commandPrefix.trim()) {
@@ -60,27 +60,27 @@ router.post('/', async (req, res) => {
     // Handle LLM settings
     if (req.body.llm && typeof req.body.llm === 'object') {
       const llmValidation = validateLLMSettings(req.body.llm);
-      
+
       if (llmValidation.error) {
         return res.status(400).json({
           success: false,
           error: `LLM validation errors: ${llmValidation.error}`
         });
       }
-      
+
       updates.llm = llmValidation.settings;
       updated.push('LLM configuration');
     }
-    
+
     if (updated.length === 0) {
       return res.status(400).json({
         success: false,
         error: 'No valid settings provided'
       });
     }
-    
+
     const success = await storage.updateSettings(updates);
-    
+
     if (success) {
       await storage.addActivity(`Settings updated: ${updated.join(', ')}`);
       res.json({
@@ -106,7 +106,7 @@ router.post('/', async (req, res) => {
 router.get('/models', async (req, res) => {
   try {
     const featherlessProvider = new FeatherlessProvider();
-    
+
     if (!featherlessProvider.isAvailable()) {
       return res.status(503).json({
         success: false,
@@ -115,7 +115,7 @@ router.get('/models', async (req, res) => {
     }
 
     const models = await featherlessProvider.fetchAvailableModels();
-    
+
     res.json({
       success: true,
       data: models,
@@ -135,7 +135,7 @@ router.get('/models', async (req, res) => {
 router.post('/reset', async (req, res) => {
   try {
     await storage.init();
-    
+
     const defaultSettings = {
       botToken: '',
       commandPrefix: '!',
@@ -145,9 +145,9 @@ router.post('/reset', async (req, res) => {
         repetition_penalty: 1
       }
     };
-    
+
     const success = await storage.updateSettings(defaultSettings);
-    
+
     if (success) {
       await storage.addActivity('Settings reset to defaults');
       res.json({
@@ -165,6 +165,38 @@ router.post('/reset', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Server error'
+    });
+  }
+});
+
+// Get OpenRouter models (requires API key)
+router.get('/models/openrouter', async (req, res) => {
+  try {
+    const apiKey = req.headers['x-api-key'] || req.query.apiKey;
+
+    if (!apiKey) {
+      return res.status(400).json({
+        success: false,
+        error: 'OpenRouter API key required. Provide it in X-API-Key header or apiKey query parameter.'
+      });
+    }
+
+    const OpenRouterProvider = require('../../llm/providers/OpenRouterProvider');
+    const openRouterProvider = new OpenRouterProvider();
+
+    const models = await openRouterProvider.fetchAvailableModels(apiKey);
+
+    res.json({
+      success: true,
+      data: models,
+      provider: 'openrouter',
+      count: models.length
+    });
+  } catch (error) {
+    console.error('Failed to fetch OpenRouter models:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch available models from OpenRouter'
     });
   }
 });

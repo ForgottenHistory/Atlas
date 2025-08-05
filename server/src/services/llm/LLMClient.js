@@ -1,10 +1,11 @@
 const FeatherlessProvider = require('./providers/FeatherlessProvider');
+const OpenRouterProvider = require('./providers/OpenRouterProvider');
 
 class LLMClient {
   constructor() {
     this.providers = new Map();
-    this.currentProvider = 'featherless';
-    
+    this.currentProvider = 'featherless'; // Default provider
+
     // Initialize available providers
     this.initializeProviders();
   }
@@ -19,24 +20,49 @@ class LLMClient {
       console.warn('Featherless provider not available');
     }
 
-    // Future providers can be added here
-    // const openai = new OpenAIProvider();
-    // if (openai.isAvailable()) {
-    //   this.providers.set('openai', openai);
-    // }
+    // Add OpenRouter provider
+    const openrouter = new OpenRouterProvider();
+    this.providers.set('openrouter', openrouter);
+    console.log('OpenRouter provider initialized');
   }
 
   async generateResponse(prompt, settings = {}) {
-    const provider = this.providers.get(this.currentProvider);
-    
+    // DEBUG: Log exactly what settings are being passed
+    console.log('LLMClient.generateResponse called with:', {
+      promptLength: prompt.length,
+      settingsProvider: settings.provider,
+      settingsApiKey: settings.api_key ? 'PRESENT' : 'MISSING',
+      settingsModel: settings.model,
+      currentProvider: this.currentProvider,
+      allSettingsKeys: Object.keys(settings)
+    });
+
+    // Use provider from settings if provided, otherwise use current provider
+    const providerName = settings.provider || this.currentProvider;
+    const provider = this.providers.get(providerName);
+
+    console.log('Selected provider:', providerName, 'Available:', !!provider);
+
     if (!provider) {
-      throw new Error(`Provider '${this.currentProvider}' not available`);
+      throw new Error(`Provider '${providerName}' not available`);
     }
 
-    // Validate settings for the current provider
-    const validationErrors = provider.validateSettings(settings);
-    if (validationErrors.length > 0) {
-      throw new Error(`Invalid settings: ${validationErrors.join(', ')}`);
+    // For OpenRouter, we need the API key in settings
+    if (providerName === 'openrouter' && !settings.api_key) {
+      throw new Error('OpenRouter API key required in settings');
+    }
+
+    // For Featherless, validate it has the env var API key
+    if (providerName === 'featherless' && !provider.isAvailable()) {
+      throw new Error('Featherless API key not configured in environment variables');
+    }
+
+    // Validate settings for the provider - only if provider has validation
+    if (provider.validateSettings) {
+      const validationErrors = provider.validateSettings(settings);
+      if (validationErrors.length > 0) {
+        throw new Error(`Invalid settings: ${validationErrors.join(', ')}`);
+      }
     }
 
     try {
@@ -78,6 +104,27 @@ class LLMClient {
 
   isProviderAvailable(providerName) {
     return this.providers.has(providerName);
+  }
+
+  // Method to get models for a specific provider
+  async getModelsForProvider(providerName, apiKey = null) {
+    const provider = this.providers.get(providerName);
+    if (!provider) {
+      throw new Error(`Provider '${providerName}' not available`);
+    }
+
+    if (!provider.fetchAvailableModels) {
+      throw new Error(`Provider '${providerName}' does not support model fetching`);
+    }
+
+    if (providerName === 'openrouter') {
+      if (!apiKey) {
+        throw new Error('API key required for OpenRouter');
+      }
+      return await provider.fetchAvailableModels(apiKey);
+    } else {
+      return await provider.fetchAvailableModels();
+    }
   }
 }
 

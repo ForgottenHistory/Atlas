@@ -122,8 +122,9 @@ class MessageProcessor {
 
   async processMessageImages(message) {
     try {
-      // Get image processing settings from LLM settings
-      const llmSettings = storage.getLLMSettings();
+      // FIX: Get image processing settings from main settings
+      const settings = storage.getSettings();
+      const llmSettings = settings.llm || {};
 
       logger.debug('Checking image processing settings', {
         source: 'discord',
@@ -154,51 +155,35 @@ class MessageProcessor {
         return;
       }
 
+      // Process images with settings
+      const imageSettings = {
+        provider: llmSettings.image_provider,
+        model: llmSettings.image_model,
+        apiKey: llmSettings.image_api_key,
+        maxSize: llmSettings.image_max_size || 5,
+        quality: llmSettings.image_quality || 2
+      };
+
       logger.info('Processing images in message', {
         source: 'discord',
         messageId: message.id,
         author: message.author.username,
         channel: message.channel.name,
-        provider: llmSettings.image_provider,
-        model: llmSettings.image_model
+        provider: imageSettings.provider,
+        model: imageSettings.model
       });
 
-      // Process images using the image processing service
-      const imageSettings = {
-        provider: llmSettings.image_provider,
-        apiKey: llmSettings.image_api_key,
-        model: llmSettings.image_model,
-        quality: llmSettings.image_quality || 2,
-        maxSize: llmSettings.image_max_size || 5
-      };
+      const imageResults = await this.imageProcessor.analyzeMessageImages(message, imageSettings);
 
-      const results = await this.imageProcessor.processMessageImages(message, imageSettings);
-
-      if (results && results.length > 0) {
-        // Add image analysis to the message object for later use
-        message.imageAnalysis = results;
+      if (imageResults && imageResults.length > 0) {
+        message.imageAnalysis = imageResults;
 
         logger.success('Image analysis completed', {
           source: 'discord',
           messageId: message.id,
-          imageCount: results.length,
-          provider: llmSettings.image_provider,
-          model: llmSettings.image_model
+          imageCount: imageResults.length,
+          provider: imageSettings.provider
         });
-
-        // Store image analysis in conversation history
-        for (const result of results) {
-          await this.conversationManager.addImageAnalysis(message.channel.id, {
-            messageId: message.id,
-            author: message.author.username,
-            imageUrl: result.imageUrl,
-            filename: result.filename,
-            analysis: result.analysis,
-            provider: result.provider,
-            model: result.model,
-            timestamp: new Date()
-          });
-        }
       } else {
         logger.debug('No image analysis results returned', {
           source: 'discord',
@@ -209,11 +194,9 @@ class MessageProcessor {
     } catch (error) {
       logger.error('Failed to process message images', {
         source: 'discord',
-        error: error.message,
         messageId: message.id,
-        author: message.author.username
+        error: error.message
       });
-      // Don't fail the entire message processing if image analysis fails
     }
   }
 

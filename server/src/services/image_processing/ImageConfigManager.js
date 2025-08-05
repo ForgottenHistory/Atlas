@@ -2,7 +2,8 @@ const storage = require('../../utils/storage');
 
 class ImageConfigManager {
   getImageSettings() {
-    const llmSettings = storage.getLLMSettings();
+    const settings = storage.getSettings();
+    const llmSettings = settings.llm || {};
 
     return {
       enabled: !!(llmSettings.image_provider && llmSettings.image_model && llmSettings.image_api_key),

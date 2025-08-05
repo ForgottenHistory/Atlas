@@ -15,8 +15,8 @@ const TokenManagement = ({ formData, onInputChange, isSubmitting }) => {
           ? 'Must be between 50 and 4000 characters' : null;
       case 'context_limit':
         const contextLimit = parseInt(value);
-        return value !== '' && (isNaN(contextLimit) || contextLimit < 512 || contextLimit > 32768) 
-          ? 'Must be between 512 and 32768 tokens' : null;
+        return value !== '' && (isNaN(contextLimit) || contextLimit < 512 || contextLimit > 1000000) 
+          ? 'Must be between 512 and 1000000 tokens' : null;
       default:
         return null;
     }
@@ -60,7 +60,7 @@ const TokenManagement = ({ formData, onInputChange, isSubmitting }) => {
           type="number"
           step="1"
           min="512"
-          max="32768"
+          max="1000000"
           label="Context Token Limit"
           value={formData.context_limit}
           onChange={handleInputChange}

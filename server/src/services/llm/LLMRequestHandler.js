@@ -5,7 +5,7 @@ class LLMRequestHandler {
   constructor(requestQueue) {
     this.requestQueue = requestQueue;
     this.llmClient = new LLMClient();
-    
+
     logger.info('LLM Request Handler initialized', {
       source: 'llm',
       provider: this.llmClient.getCurrentProvider(),
@@ -31,7 +31,7 @@ class LLMRequestHandler {
     );
   }
 
-async _handleCharacterGeneration(contextManager, responseManager, context) {
+  async _handleCharacterGeneration(contextManager, responseManager, context) {
     try {
       logger.info('Processing character response generation', {
         source: 'llm',
@@ -44,13 +44,13 @@ async _handleCharacterGeneration(contextManager, responseManager, context) {
       // Build the complete prompt with dynamic memory management
       const promptResult = contextManager.buildCharacterPrompt(context);
       const { prompt, metadata: tokenUsage } = promptResult;
-      
+
       // Log prompt building results
       this._logPromptResults(tokenUsage, context.characterName);
-      
+
       // NEW: Broadcast prompt data to frontend via socket
       this._broadcastPromptData(prompt, tokenUsage, context);
-      
+
       // Validate token limits before sending to LLM
       const validation = contextManager.validateTokenLimits(context);
       if (!validation.isValid) {
@@ -60,10 +60,10 @@ async _handleCharacterGeneration(contextManager, responseManager, context) {
           recommendations: validation.recommendations
         });
       }
-      
+
       // Generate response using LLM client
       const llmResponse = await this._generateLLMResponse(prompt, context.llmSettings);
-      
+
       // Process and format the response
       const processedResponse = responseManager.processCharacterResponse(
         llmResponse.rawResponse,
@@ -71,7 +71,7 @@ async _handleCharacterGeneration(contextManager, responseManager, context) {
         context,
         tokenUsage
       );
-      
+
       logger.success('Character response generated successfully', {
         source: 'llm',
         finalLength: processedResponse.response.length,
@@ -81,15 +81,15 @@ async _handleCharacterGeneration(contextManager, responseManager, context) {
         wasTruncated: processedResponse.metadata.truncationInfo.wasTruncated,
         tokenEfficiency: `${tokenUsage.messagesIncluded} messages in ${tokenUsage.totalTokens} tokens`
       });
-      
+
       return processedResponse;
-      
+
     } catch (error) {
       return this._handleGenerationError(error, context.characterName);
     }
   }
 
-_broadcastPromptData(prompt, tokenUsage, context) {
+  _broadcastPromptData(prompt, tokenUsage, context) {
     try {
       const promptData = {
         prompt: prompt,
@@ -102,19 +102,19 @@ _broadcastPromptData(prompt, tokenUsage, context) {
 
       // Store globally for socket requests
       global.lastPromptData = promptData;
-      
+
       // Emit directly using Node.js events to notify socket system
       process.nextTick(() => {
         process.emit('promptGenerated', promptData);
       });
-      
+
       logger.debug('Prompt data stored and event emitted', {
         source: 'llm',
         promptLength: prompt.length,
         character: context.characterName,
         totalTokens: tokenUsage.totalTokens
       });
-      
+
     } catch (error) {
       logger.warn('Failed to broadcast prompt data', {
         source: 'llm',
@@ -125,23 +125,28 @@ _broadcastPromptData(prompt, tokenUsage, context) {
 
   async _handleCustomGeneration(responseManager, { prompt, settings }) {
     try {
+      // Log what provider is being used for the custom request
+      const currentProvider = settings.provider || this.llmClient.getCurrentProvider();
+
       logger.info('Processing custom response generation', {
         source: 'llm',
         promptLength: prompt.length,
-        provider: this.llmClient.getCurrentProvider(),
-        hasCharacterLimit: !!settings.max_characters
+        provider: currentProvider,
+        hasCharacterLimit: !!settings.max_characters,
+        settingsProvider: settings.provider,
+        hasApiKey: !!settings.api_key
       });
 
-      // Generate response using LLM client
+      // Generate response using LLM client with the passed settings
       const llmResponse = await this._generateLLMResponse(prompt, settings);
-      
+
       // Process the response
       const processedResponse = responseManager.processCustomResponse(
         llmResponse.rawResponse,
         llmResponse.responseTime,
         settings
       );
-      
+
       logger.success('Custom response generated', {
         source: 'llm',
         responseLength: processedResponse.response.length,
@@ -151,7 +156,7 @@ _broadcastPromptData(prompt, tokenUsage, context) {
       });
 
       return processedResponse;
-      
+
     } catch (error) {
       return this._handleGenerationError(error, 'custom');
     }
@@ -161,14 +166,14 @@ _broadcastPromptData(prompt, tokenUsage, context) {
     const startTime = Date.now();
     const rawResponse = await this.llmClient.generateResponse(prompt, settings);
     const responseTime = Date.now() - startTime;
-    
+
     logger.info('Raw LLM response received', {
       source: 'llm',
       responseTime: `${responseTime}ms`,
       rawLength: rawResponse.length,
       provider: this.llmClient.getCurrentProvider()
     });
-    
+
     return { rawResponse, responseTime };
   }
 
@@ -192,7 +197,7 @@ _broadcastPromptData(prompt, tokenUsage, context) {
       context: context,
       provider: this.llmClient.getCurrentProvider()
     });
-    
+
     return {
       success: false,
       error: error.message,

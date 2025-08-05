@@ -1,5 +1,34 @@
+/**
+ * Get default LLM settings
+ * @returns {Object} - Default LLM settings
+ */
+function getDefaultLLMSettings() {
+  return {
+    provider: 'featherless',
+    systemPrompt: '',
+    temperature: 0.6,
+    top_p: 1,
+    repetition_penalty: 1,
+    image_provider: '',
+    image_model: '',
+    image_api_key: '',
+    image_max_size: 5,
+    image_quality: 2
+  };
+}
+
 // LLM settings validation rules
 const VALIDATION_RULES = {
+  provider: {
+    type: 'string',
+    enum: ['featherless', 'openrouter'],
+    description: 'Provider must be featherless or openrouter'
+  },
+  api_key: {
+    type: 'string',
+    maxLength: 500,
+    description: 'API key must be under 500 characters'
+  },
   systemPrompt: {
     type: 'string',
     maxLength: 8000,
@@ -89,6 +118,27 @@ function validateLLMSettings(llmSettings) {
   
   console.log('Validating LLM settings:', llmSettings);
   
+  // Validate provider (string)
+  if (llmSettings.provider !== undefined) {
+    if (typeof llmSettings.provider === 'string') {
+      validatedSettings.provider = llmSettings.provider.trim();
+    } else {
+      errors.push('Provider must be a string');
+    }
+  }
+  
+  // Validate API key (string)
+  if (llmSettings.api_key !== undefined) {
+    if (typeof llmSettings.api_key === 'string') {
+      // Only store non-empty values
+      if (llmSettings.api_key.trim() !== '') {
+        validatedSettings.api_key = llmSettings.api_key.trim();
+      }
+    } else {
+      errors.push('API key must be a string');
+    }
+  }
+  
   // Validate model (string)
   if (llmSettings.model !== undefined) {
     if (typeof llmSettings.model === 'string') {
@@ -107,6 +157,19 @@ function validateLLMSettings(llmSettings) {
     }
   }
   
+  // Get context limit based on provider
+  const getContextLimits = (provider) => {
+    switch (provider) {
+      case 'openrouter':
+        return { min: 512, max: 1000000 }; // OpenRouter supports very large contexts
+      case 'featherless':
+      default:
+        return { min: 512, max: 32768 }; // Conservative default
+    }
+  };
+  
+  const contextLimits = getContextLimits(validatedSettings.provider || llmSettings.provider);
+  
   // Validate numeric parameters
   const numericFields = {
     temperature: { min: 0, max: 2, required: false },
@@ -118,7 +181,7 @@ function validateLLMSettings(llmSettings) {
     min_p: { min: 0, max: 1, required: false },
     max_tokens: { min: 1, max: 8192, required: false, integer: true },
     max_characters: { min: 50, max: 4000, required: false, integer: true },
-    context_limit: { min: 512, max: 32768, required: false, integer: true },
+    context_limit: { min: contextLimits.min, max: contextLimits.max, required: false, integer: true },
     image_max_size: { min: 0.1, max: 50, required: false },
     image_quality: { min: 1, max: 3, required: false, integer: true }
   };
@@ -190,24 +253,6 @@ function validateLLMSettings(llmSettings) {
   return {
     error: errors.length > 0 ? errors.join(', ') : null,
     settings: validatedSettings
-  };
-}
-
-/**
- * Get default LLM settings
- * @returns {Object} - Default LLM settings
- */
-function getDefaultLLMSettings() {
-  return {
-    systemPrompt: '',
-    temperature: 0.6,
-    top_p: 1,
-    repetition_penalty: 1,
-    image_provider: '',
-    image_model: '',
-    image_api_key: '',
-    image_max_size: 5,
-    image_quality: 2
   };
 }
 
