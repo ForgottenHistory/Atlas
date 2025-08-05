@@ -32,8 +32,8 @@ class ImageProcessingService {
       }
 
       // Extract and analyze images
-      const results = await this.analyzer.analyzeMessageImages(message, settings);
-      
+      const results = await this.imageProcessor.processMessageImages(message, imageSettings);
+
       if (results && results.length > 0) {
         this.statsTracker.recordSuccess(settings.provider, Date.now() - startTime);
         return results;
