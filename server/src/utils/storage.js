@@ -120,6 +120,7 @@ class Storage {
     return this.data?.settings || this.getDefaultData().settings;
   }
 
+  /** @deprecated */
   getLLMSettings() {
     const settings = this.getSettings();
     // Ensure we have all default LLM settings
