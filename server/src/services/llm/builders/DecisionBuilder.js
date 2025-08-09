@@ -5,7 +5,7 @@ const {
   TOOL_ENHANCED_DECISION_TEMPLATE,
   BATCH_DECISION_TEMPLATE,
   CHANNEL_ANALYSIS_TEMPLATE
-} = require('../prompts/DecisionBuilder');
+} = require('../prompts/decisionPrompts');
 
 /**
  * Handles all decision-making prompt generation

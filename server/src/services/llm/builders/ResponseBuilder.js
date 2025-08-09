@@ -6,7 +6,7 @@ const {
   EXAMPLE_MESSAGES_TEMPLATE,
   CONVERSATION_HISTORY_TEMPLATE,
   REPLY_TO_TEMPLATE
-} = require('../prompts/ResponseBuilder');
+} = require('../prompts/responsePrompts');
 
 /**
  * Handles all response generation prompt building
