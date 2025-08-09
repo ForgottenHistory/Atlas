@@ -35,7 +35,15 @@ class PluginSystem {
       );
 
       // Initialize message pipeline with plugin support
-      this.messagePipeline = new MessagePipeline(Object.fromEntries(this.dependencies));
+      this.messagePipeline = new MessagePipeline({
+        discordClient: this.dependencies.get('discordClient'),
+        llmService: this.dependencies.get('llmService'),
+        conversationManager: this.dependencies.get('conversationManager'),
+        responseGenerator: this.dependencies.get('responseGenerator'),
+        messageFilter: this.dependencies.get('messageFilter'),
+        actionExecutor: this.dependencies.get('actionExecutor'),
+        channelManager: this.dependencies.get('channelManager') // Add channelManager
+      });
 
       // Setup event listeners
       this.setupEventListeners();
@@ -226,13 +234,19 @@ class PluginSystem {
       responseGenerator: atlasDependencies.responseGenerator,
       messageFilter: atlasDependencies.messageFilter,
       actionExecutor: atlasDependencies.actionExecutor,
+      channelManager: atlasDependencies.channelManager,
       // Add more as needed
     };
 
-    // Filter out undefined dependencies
+    // Filter out undefined dependencies and store them
     Object.entries(coreDependencies).forEach(([name, dependency]) => {
-      if (dependency !== undefined) {
+      if (dependency !== undefined && dependency !== null) {
         this.dependencies.set(name, dependency);
+      } else {
+        logger.warn('Dependency is null/undefined, skipping', {
+          source: 'plugin_system',
+          dependencyName: name
+        });
       }
     });
 

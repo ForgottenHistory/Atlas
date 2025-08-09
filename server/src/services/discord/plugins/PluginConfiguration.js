@@ -7,6 +7,61 @@
 const ProfileLookupTool = require('./tools/ProfileLookupTool');
 const ResponseAction = require('./actions/ResponseAction');
 
+// Simple inline action handlers
+const IgnoreActionHandler = require('./interfaces/Action');
+const ReactionActionHandler = require('./interfaces/Action');
+
+// Inline Ignore Action
+class SimpleIgnoreAction extends IgnoreActionHandler {
+  async execute(context) {
+    // Just log that we're ignoring - no actual action needed
+    return this.success({ action: 'ignore', ignored: true });
+  }
+  
+  getMetadata() {
+    return {
+      name: 'SimpleIgnoreAction',
+      type: 'action', 
+      description: 'Ignores the message - no response needed',
+      discordPermissions: [],
+      estimatedExecutionTime: '0s'
+    };
+  }
+}
+
+// Inline Reaction Action  
+class SimpleReactionAction extends ReactionActionHandler {
+  async execute(context) {
+    const { decision, originalMessage } = context;
+    const emoji = decision.emoji || '👍';
+    
+    try {
+      if (originalMessage && originalMessage.react) {
+        await originalMessage.react(emoji);
+        return this.success({ action: 'react', emoji });
+      } else {
+        return this.error(new Error('Cannot react - no original message'));
+      }
+    } catch (error) {
+      return this.error(error);
+    }
+  }
+  
+  getMetadata() {
+    return {
+      name: 'SimpleReactionAction',
+      type: 'action',
+      description: 'Adds emoji reactions to messages', 
+      discordPermissions: ['AddReactions'],
+      estimatedExecutionTime: '1s'
+    };
+  }
+}
+
+// Import existing action classes for conversion
+const IgnoreAction = require('../actions/IgnoreAction');
+const ReactionAction = require('../actions/ReactionAction');
+
 /**
  * Plugin definitions - this is where new plugins are registered
  * NO CORE FILE CHANGES needed to add new plugins!
@@ -83,6 +138,38 @@ const PLUGIN_DEFINITIONS = {
       description: 'Sends Discord reply responses',
       category: 'communication',
       priority: 'high'
+    }
+  },
+
+  ignore: {
+    type: 'action',
+    handler: SimpleIgnoreAction,
+    triggers: [
+      'ignore'
+    ],
+    dependencies: [],
+    config: {},
+    metadata: {
+      description: 'Ignores the message without responding',
+      category: 'communication',
+      priority: 'low'
+    }
+  },
+
+  react: {
+    type: 'action', 
+    handler: SimpleReactionAction,
+    triggers: [
+      'react'
+    ],
+    dependencies: [],
+    config: {
+      defaultEmoji: '👍'
+    },
+    metadata: {
+      description: 'Adds emoji reactions to messages',
+      category: 'communication',
+      priority: 'medium'
     }
   },
 

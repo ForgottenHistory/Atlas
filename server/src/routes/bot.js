@@ -1,206 +1,346 @@
 const express = require('express');
-const router = express.Router();
+const discordService = require('../services/discord');
+const logger = require('../services/logger/Logger');
 const storage = require('../utils/storage');
 const LLMServiceSingleton = require('../services/llm/LLMServiceSingleton');
 
-// Initialize LLM service singleton for queue monitoring
-const llmService = LLMServiceSingleton.getInstance();
+const router = express.Router();
 
-// In-memory data that doesn't need persistence (real-time stats)
+// === UTILITY FUNCTIONS FOR SOCKET SYSTEM ===
+
+// Runtime data storage for socket system
 let runtimeData = {
   isConnected: false,
-  activeUsers: 1234,
-  messagesToday: 5678,
-  uptime: 99.9
+  activeUsers: 0,
+  messagesToday: 0,
+  uptime: Date.now()
 };
 
-// Initialize storage on first load
-let storageInitialized = false;
-const initStorage = async () => {
-  if (!storageInitialized) {
-    // Storage is initialized at app startup, just load saved stats
-    const savedStats = storage.getStats();
-    runtimeData = { ...runtimeData, ...savedStats };
-    storageInitialized = true;
-  }
-};
+/**
+ * Get current runtime data
+ */
+function getRuntimeData() {
+  return { ...runtimeData };
+}
 
-// Combined data getter
-const getBotData = async () => {
-  await initStorage();
+/**
+ * Update runtime data
+ */
+function updateRuntimeData(updates) {
+  runtimeData = { ...runtimeData, ...updates };
+}
+
+/**
+ * Get comprehensive bot data
+ */
+async function getBotData() {
+  const llmService = LLMServiceSingleton.getInstance();
+  const discordStatus = discordService.getStatus();
+  const recentActivity = storage.getRecentActivity();
   
   return {
-    isConnected: runtimeData.isConnected,
+    isConnected: discordStatus.isConnected || runtimeData.isConnected,
     activeUsers: runtimeData.activeUsers,
     messagesToday: runtimeData.messagesToday,
-    uptime: runtimeData.uptime,
-    persona: storage.getPersona(),
-    settings: storage.getSettings(),
-    recentActivity: storage.getRecentActivity(),
+    uptime: Math.floor((Date.now() - runtimeData.uptime) / 1000), // seconds
+    recentActivity: recentActivity,
     queueStats: llmService.getQueueStats(),
-    queueHealth: llmService.getQueueHealth()
+    queueHealth: llmService.getQueueHealth(),
+    discordUser: discordStatus.username,
+    guilds: discordStatus.guilds
   };
-};
+}
 
-// GET /api/bot/status
-router.get('/status', async (req, res) => {
+// === EXISTING BOT ROUTES (unchanged) ===
+
+// Get bot status
+router.get('/status', (req, res) => {
   try {
-    const data = await getBotData();
-    
-    res.json({
-      success: true,
-      data: {
-        isConnected: data.isConnected,
-        activeUsers: data.activeUsers,
-        messagesToday: data.messagesToday,
-        uptime: data.uptime,
-        queueStats: data.queueStats,
-        queueHealth: data.queueHealth
-      }
-    });
+    const status = discordService.getStatus();
+    res.json({ success: true, status });
   } catch (error) {
-    console.error('Error getting bot status:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get bot status'
+    logger.error('Failed to get bot status', {
+      source: 'api',
+      error: error.message
     });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// GET /api/bot/queue
-router.get('/queue', async (req, res) => {
+// Connect bot
+router.post('/connect', async (req, res) => {
   try {
-    const queueStats = llmService.getQueueStats();
-    const queueHealth = llmService.getQueueHealth();
-    
-    res.json({
-      success: true,
-      data: {
-        stats: queueStats,
-        health: queueHealth,
-        timestamp: new Date().toISOString()
-      }
-    });
+    const result = await discordService.initialize();
+    if (result) {
+      res.json({ success: true, message: 'Bot connected successfully' });
+    } else {
+      res.status(400).json({ success: false, error: 'Failed to connect bot' });
+    }
   } catch (error) {
-    console.error('Error getting queue stats:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get queue statistics'
+    logger.error('Failed to connect bot', {
+      source: 'api',
+      error: error.message
     });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// POST /api/bot/queue/config
-router.post('/queue/config', async (req, res) => {
+// Disconnect bot
+router.post('/disconnect', async (req, res) => {
   try {
-    const { globalLimit, typeLimit, requestType } = req.body;
-    
-    if (globalLimit !== undefined) {
-      llmService.setGlobalConcurrencyLimit(globalLimit);
-      await storage.addActivity(`Queue global limit updated to ${globalLimit}`);
+    await discordService.disconnect();
+    res.json({ success: true, message: 'Bot disconnected successfully' });
+  } catch (error) {
+    logger.error('Failed to disconnect bot', {
+      source: 'api',
+      error: error.message
+    });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get servers
+router.get('/servers', (req, res) => {
+  try {
+    if (!discordService.isReady()) {
+      return res.status(400).json({ success: false, error: 'Bot is not connected' });
     }
     
-    if (typeLimit !== undefined && requestType) {
-      llmService.setQueueConcurrencyLimit(requestType, typeLimit);
-      await storage.addActivity(`Queue limit for ${requestType} updated to ${typeLimit}`);
+    const servers = discordService.getServers();
+    res.json({ success: true, servers });
+  } catch (error) {
+    logger.error('Failed to get servers', {
+      source: 'api',
+      error: error.message
+    });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get channels for a server
+router.get('/servers/:serverId/channels', (req, res) => {
+  try {
+    if (!discordService.isReady()) {
+      return res.status(400).json({ success: false, error: 'Bot is not connected' });
     }
     
-    res.json({
-      success: true,
-      data: {
-        stats: llmService.getQueueStats(),
-        message: 'Queue configuration updated'
-      }
-    });
+    const { serverId } = req.params;
+    const channels = discordService.getChannels(serverId);
+    res.json({ success: true, channels });
   } catch (error) {
-    console.error('Error updating queue config:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to update queue configuration'
+    logger.error('Failed to get channels', {
+      source: 'api',
+      serverId: req.params.serverId,
+      error: error.message
     });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// POST /api/bot/toggle
-router.post('/toggle', async (req, res) => {
+// Update active channels
+router.post('/servers/:serverId/channels/active', async (req, res) => {
   try {
-    await initStorage();
+    const { serverId } = req.params;
+    const { channelIds } = req.body;
     
-    runtimeData.isConnected = !runtimeData.isConnected;
-    
-    // Add activity log
-    const activity = await storage.addActivity(
-      `Bot ${runtimeData.isConnected ? 'connected' : 'disconnected'}`
-    );
-    
-    res.json({
-      success: true,
-      data: {
-        isConnected: runtimeData.isConnected,
-        activity
-      }
-    });
+    const result = await discordService.updateActiveChannels(serverId, channelIds);
+    res.json({ success: true, result });
   } catch (error) {
-    console.error('Error toggling bot:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to toggle bot connection'
+    logger.error('Failed to update active channels', {
+      source: 'api',
+      serverId: req.params.serverId,
+      error: error.message
     });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// GET /api/bot/activity
-router.get('/activity', async (req, res) => {
+// Get active channels
+router.get('/channels/active', (req, res) => {
   try {
-    await initStorage();
-    
-    res.json({
-      success: true,
-      data: storage.getRecentActivity()
-    });
+    const activeChannels = discordService.getActiveChannels();
+    res.json({ success: true, activeChannels });
   } catch (error) {
-    console.error('Error getting activity:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get activity'
+    logger.error('Failed to get active channels', {
+      source: 'api',
+      error: error.message
     });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// POST /api/bot/activity
-router.post('/activity', async (req, res) => {
+// Get stats
+router.get('/stats', (req, res) => {
   try {
-    const { message } = req.body;
+    const stats = discordService.getComprehensiveStats();
+    res.json({ success: true, stats });
+  } catch (error) {
+    logger.error('Failed to get bot stats', {
+      source: 'api',
+      error: error.message
+    });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// === NEW PLUGIN SYSTEM ROUTES ===
+
+// Get plugin system status
+router.get('/plugins/status', (req, res) => {
+  try {
+    const status = discordService.getPluginSystemStatus();
+    res.json({ success: true, status });
+  } catch (error) {
+    logger.error('Failed to get plugin system status', {
+      source: 'api',
+      error: error.message
+    });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Enable plugin system
+router.post('/plugins/enable', async (req, res) => {
+  try {
+    const result = await discordService.enablePluginSystem();
     
-    if (!message) {
-      return res.status(400).json({
-        success: false,
-        error: 'Message is required'
+    if (result.success) {
+      logger.info('Plugin system enabled via API', {
+        source: 'api',
+        deferred: result.deferred
       });
     }
     
-    await initStorage();
-    const activity = await storage.addActivity(message);
-    
-    res.json({
-      success: true,
-      data: activity
+    res.json({ 
+      success: result.success, 
+      message: result.message,
+      deferred: result.deferred
     });
   } catch (error) {
-    console.error('Error adding activity:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to add activity'
+    logger.error('Failed to enable plugin system', {
+      source: 'api',
+      error: error.message
     });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Export both router and data getter for socket.io
-module.exports = { 
-  router, 
-  getBotData,
-  getRuntimeData: () => runtimeData,
-  updateRuntimeData: (updates) => {
-    runtimeData = { ...runtimeData, ...updates };
+// Disable plugin system (use legacy mode)
+router.post('/plugins/disable', (req, res) => {
+  try {
+    const result = discordService.disablePluginSystem();
+    
+    logger.info('Plugin system disabled via API', {
+      source: 'api'
+    });
+    
+    res.json({ 
+      success: result.success, 
+      message: result.message 
+    });
+  } catch (error) {
+    logger.error('Failed to disable plugin system', {
+      source: 'api',
+      error: error.message
+    });
+    res.status(500).json({ success: false, error: error.message });
   }
+});
+
+// Get available tools (both legacy and plugin-based)
+router.get('/tools', (req, res) => {
+  try {
+    const tools = discordService.getAvailableTools();
+    res.json({ success: true, tools });
+  } catch (error) {
+    logger.error('Failed to get available tools', {
+      source: 'api',
+      error: error.message
+    });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get tool statistics
+router.get('/tools/stats', (req, res) => {
+  try {
+    const stats = discordService.getToolStats();
+    res.json({ success: true, stats });
+  } catch (error) {
+    logger.error('Failed to get tool stats', {
+      source: 'api',
+      error: error.message
+    });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Test plugin system manually (for development)
+router.post('/plugins/test/:pluginName', async (req, res) => {
+  try {
+    if (!discordService.isUsingPluginSystem()) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Plugin system is not active' 
+      });
+    }
+
+    const { pluginName } = req.params;
+    const { context } = req.body;
+
+    // This would require access to the PluginSystem directly
+    // For now, return a placeholder response
+    res.json({ 
+      success: true, 
+      message: `Plugin test endpoint for ${pluginName}`,
+      note: 'Manual plugin testing not yet implemented in this integration'
+    });
+  } catch (error) {
+    logger.error('Failed to test plugin', {
+      source: 'api',
+      plugin: req.params.pluginName,
+      error: error.message
+    });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get conversation history (unchanged)
+router.get('/conversations/:channelId', (req, res) => {
+  try {
+    const { channelId } = req.params;
+    const history = discordService.getConversationHistory(channelId);
+    res.json({ success: true, history });
+  } catch (error) {
+    logger.error('Failed to get conversation history', {
+      source: 'api',
+      channelId: req.params.channelId,
+      error: error.message
+    });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Clear conversation history (unchanged)
+router.delete('/conversations/:channelId', (req, res) => {
+  try {
+    const { channelId } = req.params;
+    const result = discordService.clearConversationHistory(channelId);
+    res.json({ success: result, message: result ? 'History cleared' : 'Failed to clear history' });
+  } catch (error) {
+    logger.error('Failed to clear conversation history', {
+      source: 'api',
+      channelId: req.params.channelId,
+      error: error.message
+    });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+module.exports = { 
+  router,
+  // Export utility functions for socket system
+  getBotData,
+  getRuntimeData,
+  updateRuntimeData
 };

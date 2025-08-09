@@ -190,7 +190,23 @@ class MessagePipeline {
   async shouldProcessMessage(messageContext) {
     // Use existing message filter if available
     if (this.dependencies.messageFilter) {
-      return this.dependencies.messageFilter.shouldProcess(messageContext._originalMessage);
+      // Check if channelManager is available and has the required method
+      const channelManager = this.dependencies.channelManager;
+      
+      if (channelManager && typeof channelManager.isChannelActive === 'function') {
+        // Use the correct method name and pass channelManager
+        const result = this.dependencies.messageFilter.shouldProcessMessage(
+          messageContext._originalMessage, 
+          channelManager
+        );
+        return result.shouldProcess;
+      } else {
+        // Fallback: skip channel active check if channelManager not available
+        // Just check if it's not a bot message
+        return !messageContext.author.bot && 
+               messageContext.content.length > 0 &&
+               !messageContext.content.startsWith('!');
+      }
     }
 
     // Basic filtering logic
@@ -219,11 +235,23 @@ class MessagePipeline {
     try {
       // Get conversation history if conversation manager available
       if (this.dependencies.conversationManager) {
-        const history = await this.dependencies.conversationManager.getChannelHistory(
+        // Use the correct synchronous method (not async)
+        const history = this.dependencies.conversationManager.getHistory(
           messageContext.channel.id, 
           10
         );
         channelContext.conversationHistory = history || [];
+        
+        logger.debug('Built channel context with conversation history', {
+          source: 'message_pipeline',
+          channelId: messageContext.channel.id,
+          historyLength: channelContext.conversationHistory.length
+        });
+      } else {
+        logger.warn('ConversationManager not available for history', {
+          source: 'message_pipeline',
+          channelId: messageContext.channel.id
+        });
       }
 
       // Determine activity level based on recent messages

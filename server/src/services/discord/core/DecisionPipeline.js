@@ -215,24 +215,90 @@ class DecisionPipeline {
       toolResults
     });
 
-    // Generate decision via LLM
-    const llmResponse = await this.llmService.generateDecision(prompt);
-    
-    logger.debug('Decision generated', {
-      source: 'decision_pipeline',
-      promptType,
-      toolCount: toolResults.length,
-      decision: llmResponse.action
-    });
+    // Generate decision via LLM - use correct method from actual LLM service
+    if (!this.llmService) {
+      throw new Error('LLM service not available for decision generation');
+    }
 
-    return {
-      action: llmResponse.action,
-      reasoning: llmResponse.reasoning,
-      confidence: llmResponse.confidence || 0.8,
-      promptType,
-      toolResults,
-      timestamp: new Date()
-    };
+    try {
+      // Use the actual LLM service method like DecisionMaker does
+      const decisionSettings = {
+        temperature: 0.3,
+        max_tokens: 200,
+        top_p: 0.9
+      };
+      
+      const result = await this.llmService.generateCustomResponse(prompt, decisionSettings);
+      
+      if (result.success) {
+        // Parse the decision from the response (same as DecisionMaker)
+        const decision = this.parseDecisionResponse(result.response);
+        
+        logger.debug('Decision generated via plugin system', {
+          source: 'decision_pipeline',
+          promptType,
+          toolCount: toolResults.length,
+          decision: decision.action
+        });
+
+        return {
+          action: decision.action,
+          reasoning: decision.reasoning,
+          confidence: decision.confidence || 0.8,
+          promptType,
+          toolResults,
+          timestamp: new Date()
+        };
+      } else {
+        throw new Error(result.error || 'LLM generation failed');
+      }
+    } catch (error) {
+      logger.error('LLM decision generation failed', {
+        source: 'decision_pipeline',
+        error: error.message
+      });
+      
+      // Return fallback decision
+      return {
+        action: 'ignore',
+        reasoning: 'LLM decision generation failed, using fallback',
+        confidence: 0.1,
+        promptType,
+        toolResults,
+        error: true,
+        timestamp: new Date()
+      };
+    }
+  }
+
+  /**
+   * Parse decision response from LLM (simple parser)
+   */
+  parseDecisionResponse(response) {
+    try {
+      // Simple parsing - look for ACTION: line
+      const actionMatch = response.match(/ACTION:\s*(\w+)/i);
+      const reasoningMatch = response.match(/REASONING:\s*(.+?)(?:\n|$)/i);
+      const confidenceMatch = response.match(/CONFIDENCE:\s*([\d.]+)/i);
+      
+      return {
+        action: actionMatch ? actionMatch[1].toLowerCase() : 'ignore',
+        reasoning: reasoningMatch ? reasoningMatch[1].trim() : 'No reasoning provided',
+        confidence: confidenceMatch ? parseFloat(confidenceMatch[1]) : 0.5
+      };
+    } catch (error) {
+      logger.error('Failed to parse decision response', {
+        source: 'decision_pipeline',
+        error: error.message,
+        response: response.substring(0, 100)
+      });
+      
+      return {
+        action: 'ignore',
+        reasoning: 'Failed to parse LLM response',
+        confidence: 0.1
+      };
+    }
   }
 
   /**
