@@ -1,180 +1,307 @@
 const storage = require('../../../utils/storage');
+const TemplateEngine = require('../prompts/TemplateEngine');
+const { 
+  QUICK_DECISION_TEMPLATE,
+  TOOL_ENHANCED_DECISION_TEMPLATE,
+  BATCH_DECISION_TEMPLATE,
+  CHANNEL_ANALYSIS_TEMPLATE
+} = require('../prompts/decisionPrompts');
+
+const {
+  DEFAULT_SYSTEM_PROMPT,
+  CHARACTER_PROMPT_TEMPLATE,
+  CHARACTER_IDENTITY_TEMPLATE,
+  EXAMPLE_MESSAGES_TEMPLATE,
+  CONVERSATION_HISTORY_TEMPLATE,
+  REPLY_TO_TEMPLATE
+} = require('../prompts/responsePrompts');
 
 class PromptBuilder {
+  constructor() {
+    this.strictSystemPrompt = DEFAULT_SYSTEM_PROMPT;
+  }
+
+  // === DECISION PROMPTS ===
+
   buildQuickDecisionPrompt(message, channelContext) {
     const persona = storage.getPersona();
-    
-    // Build image context if available
-    let imageContext = '';
-    if (channelContext.hasImages && message.imageAnalysis) {
-      const analyses = Array.isArray(message.imageAnalysis) ? message.imageAnalysis : [message.imageAnalysis];
-      imageContext = `\nIMAGES SHARED:\n${analyses.map((analysis, index) => 
-        `Image ${index + 1}: ${analysis.analysis.substring(0, 200)}...`
-      ).join('\n')}\n`;
-    }
+    const variables = {
+      ...TemplateEngine.buildContextVariables(message, channelContext, persona),
+      conversationContext: TemplateEngine.buildConversationContext(channelContext.conversationHistory),
+      imageContext: TemplateEngine.buildImageContext(message, channelContext)
+    };
 
-    // Build conversation context
-    let conversationContext = '';
-    if (channelContext.conversationHistory && channelContext.conversationHistory.length > 0) {
-      const recentMessages = channelContext.conversationHistory.slice(-3);
-      conversationContext = `\nRECENT CONVERSATION:\n${recentMessages.map(msg => 
-        `${msg.author}: ${msg.content.substring(0, 100)}${msg.content.length > 100 ? '...' : ''}`
-      ).join('\n')}\n`;
-    }
+    return TemplateEngine.substitute(QUICK_DECISION_TEMPLATE, variables);
+  }
 
-    return `You are ${persona.name || 'Atlas'}, a Discord bot with autonomous decision-making.
+  buildToolDecisionPrompt(message, channelContext, toolResults, previousActions) {
+    const persona = storage.getPersona();
+    const variables = {
+      ...TemplateEngine.buildContextVariables(message, channelContext, persona),
+      conversationContext: TemplateEngine.buildConversationContext(channelContext.conversationHistory),
+      imageContext: TemplateEngine.buildImageContext(message, channelContext),
+      toolResults: TemplateEngine.buildToolResults(toolResults),
+      actionHistory: TemplateEngine.buildActionHistory(previousActions)
+    };
 
-Your personality: ${persona.description || 'A helpful, engaging bot'}
-
-Current situation:
-- Channel: ${channelContext.channelName} in ${channelContext.serverName}
-- Recent activity level: ${channelContext.activityLevel || 'normal'}
-- Your last action: ${channelContext.lastAction || 'none'} (${this.timeSinceLastAction()} ago)
-
-${conversationContext}
-New message to analyze:
-Author: ${message.author.username}
-Content: "${message.content}"
-${imageContext}
-
-DECISION TIME: Choose ONE action and provide reasoning.
-
-Respond in this EXACT format:
-ACTION: [respond|reply|react|ignore|status_change]
-CONFIDENCE: [0.0-1.0]
-REASONING: [brief explanation]
-EMOJI: [only if ACTION is react, otherwise leave blank]
-STATUS: [only if ACTION is status_change: online|away|dnd|invisible]
-
-Guidelines:
-- respond: Generate a full conversational response (normal send) - use for general chat, flowing conversation
-- reply: Generate a response using Discord's reply function (creates visual connection) - use for direct questions, specific references to previous messages, or when you need to emphasize you're responding to something specific
-- react: Add emoji reaction to their message  
-- ignore: Take no action, let conversation flow
-- status_change: Update your Discord status
-
-Consider:
-- Don't respond to every message (be selective like a human)
-- Use respond for most casual conversation and general chat
-- Use reply only when the message is clearly directed at you or references something specific
-- React to funny/interesting content or images
-- Images often warrant some kind of response or reaction
-- Change status based on mood/activity
-- Avoid being too chatty or annoying
-- If someone shares an image, consider acknowledging it
-
-Context clues for reply vs respond:
-- Reply: Direct questions, "@mentions", specific references to your previous responses, corrections, formal requests
-- Respond: General conversation, flowing chat, observations, casual remarks, continuing discussion naturally`;
+    return TemplateEngine.substitute(TOOL_ENHANCED_DECISION_TEMPLATE, variables);
   }
 
   buildChannelAnalysisPrompt(analysisContext) {
     const persona = storage.getPersona();
-    
-    return `You are ${persona.name || 'Atlas'} analyzing channel activity for proactive engagement.
+    const variables = {
+      characterName: persona.name || 'Atlas',
+      channelName: analysisContext.channelName || 'unknown',
+      serverName: analysisContext.serverName || 'unknown',
+      activityLevel: analysisContext.activityLevel || 'normal',
+      participantCount: analysisContext.participantCount || 0,
+      messagesSummary: analysisContext.messagesSummary || 'No recent messages'
+    };
 
-Channel: ${analysisContext.channelName} in ${analysisContext.serverName}
-Activity Level: ${analysisContext.activityLevel}
-Participants: ${analysisContext.participantCount} people
-Recent messages (last 5):
-${analysisContext.messagesSummary}
-
-Should you proactively start a conversation or comment on the current topic?
-
-Respond in this EXACT format:
-ENGAGE: [yes|no]
-CONFIDENCE: [0.0-1.0]
-REASONING: [brief explanation]
-
-Consider:
-- Is the topic interesting to you?
-- Is there a natural conversation entry point?
-- Are people actively chatting?
-- Have you been quiet for a while?
-- Would your input add value?
-- Are there images that might spark conversation?`;
-  }
-
-  buildConservativeDecisionPrompt(message, channelContext) {
-    const basePrompt = this.buildQuickDecisionPrompt(message, channelContext);
-    
-    return basePrompt + `\n\nCONSERVATIVE MODE: Be more selective about when to respond. Only engage when:
-- Directly addressed or mentioned
-- Clear questions are asked
-- Images are shared that clearly warrant comment
-- Conversation specifically involves topics you should respond to
-Default to 'ignore' unless there's a compelling reason to respond.`;
-  }
-
-  buildAggressiveDecisionPrompt(message, channelContext) {
-    const basePrompt = this.buildQuickDecisionPrompt(message, channelContext);
-    
-    return basePrompt + `\n\nAGGRESSIVE MODE: Be more engaging and proactive. Consider responding when:
-- You have something interesting to add to the conversation
-- The topic aligns with your personality
-- You can provide helpful information or insights
-- The conversation seems to be dying down and could use energy
-- Images are shared (almost always react or respond)
-Favor engagement over silence, but still be natural.`;
-  }
-
-  buildImageFocusedDecisionPrompt(message, channelContext) {
-    const basePrompt = this.buildQuickDecisionPrompt(message, channelContext);
-    
-    return basePrompt + `\n\nIMAGE FOCUS MODE: This message contains images. Consider:
-- Images often deserve acknowledgment (react or respond)
-- What do the images show? Are they interesting, funny, impressive?
-- Does the image content relate to ongoing conversation?
-- Would a reaction emoji be more appropriate than a full response?
-- Images are social content - ignoring them completely can seem antisocial
-Strongly favor some form of engagement (react/respond) over ignore for image messages.`;
-  }
-
-  timeSinceLastAction() {
-    // This would typically come from the DecisionTracker
-    // For now, return a placeholder
-    return 'unknown';
-  }
-
-  buildTestDecisionPrompt(testScenario) {
-    const persona = storage.getPersona();
-    
-    return `You are ${persona.name || 'Atlas'} in a test scenario: ${testScenario.description}
-
-Test message:
-Author: ${testScenario.author}
-Content: "${testScenario.content}"
-Channel: ${testScenario.channel}
-
-What would you do? Use the standard decision format:
-ACTION: [respond|reply|react|ignore|status_change]
-CONFIDENCE: [0.0-1.0]
-REASONING: [brief explanation]
-EMOJI: [only if ACTION is react]
-STATUS: [only if ACTION is status_change]`;
+    return TemplateEngine.substitute(CHANNEL_ANALYSIS_TEMPLATE, variables);
   }
 
   buildBatchDecisionPrompt(messages, context) {
     const persona = storage.getPersona();
-    
     const messageList = messages.map((msg, index) => 
       `${index + 1}. ${msg.author.username}: "${msg.content}"`
     ).join('\n');
 
-    return `You are ${persona.name || 'Atlas'} analyzing multiple messages for batch decision making.
+    const variables = {
+      characterName: persona.name || 'Atlas',
+      channelName: context.channelName || 'unknown',
+      serverName: context.serverName || 'unknown',
+      activityLevel: context.activityLevel || 'normal',
+      messageList: messageList
+    };
 
-Context: ${context.channelName} in ${context.serverName}
-Activity: ${context.activityLevel}
+    return TemplateEngine.substitute(BATCH_DECISION_TEMPLATE, variables);
+  }
 
-Messages to analyze:
-${messageList}
+  // === RESPONSE GENERATION PROMPTS ===
 
-For each message, decide what action to take. Respond with:
-MESSAGE_1: ACTION=[action] CONFIDENCE=[0.0-1.0] REASONING=[reason]
-MESSAGE_2: ACTION=[action] CONFIDENCE=[0.0-1.0] REASONING=[reason]
-[etc...]
+  buildCharacterPrompt(context) {
+    const {
+      systemPrompt,
+      characterName,
+      characterDescription,
+      exampleMessages,
+      conversationHistory = [],
+      llmSettings = {},
+      currentMessage
+    } = context;
 
-Consider the flow of conversation and avoid responding to every single message.`;
+    // Get token limits
+    const contextLimit = llmSettings.context_limit || 4096;
+    const safetyBuffer = Math.ceil(contextLimit * 0.1);
+    const availableTokens = contextLimit - safetyBuffer;
+
+    // Build sections
+    const systemSection = systemPrompt || this.strictSystemPrompt;
+    const characterSection = this.buildCharacterIdentitySection(characterName, characterDescription);
+    const exampleSection = this.buildExampleMessagesSection(exampleMessages, characterName);
+
+    // Calculate base tokens
+    const basePrompt = systemSection + characterSection + exampleSection;
+    const baseTokens = TemplateEngine.estimateTokenCount(basePrompt);
+
+    // Build dynamic history with remaining tokens
+    const historyTokenBudget = availableTokens - baseTokens;
+    const historySection = this.buildDynamicHistorySection(conversationHistory, historyTokenBudget);
+    const replyToSection = this.buildReplyToSection(currentMessage);
+
+    // Assemble final prompt
+    const variables = {
+      systemPrompt: systemSection + '\n\n',
+      characterIdentity: characterSection,
+      exampleMessages: exampleSection,
+      conversationHistory: historySection,
+      replyToSection: replyToSection,
+      characterName: characterName || ''
+    };
+
+    const finalPrompt = TemplateEngine.substitute(CHARACTER_PROMPT_TEMPLATE, variables);
+
+    return {
+      prompt: finalPrompt,
+      metadata: {
+        totalTokens: TemplateEngine.estimateTokenCount(finalPrompt),
+        baseTokens: baseTokens,
+        historyTokens: TemplateEngine.estimateTokenCount(historySection),
+        availableTokens: availableTokens,
+        contextLimit: contextLimit,
+        safetyBuffer: safetyBuffer,
+        messagesIncluded: this.countMessagesInHistory(historySection)
+      }
+    };
+  }
+
+  // === HELPER METHODS ===
+
+  buildCharacterIdentitySection(name, description) {
+    if (!name && !description) return '';
+    
+    const variables = {
+      characterName: name || '',
+      characterDescription: description || ''
+    };
+
+    return TemplateEngine.substitute(CHARACTER_IDENTITY_TEMPLATE, variables);
+  }
+
+  buildExampleMessagesSection(exampleMessages, characterName) {
+    if (!exampleMessages || !exampleMessages.trim()) return '';
+
+    const examples = this.cleanExampleMessages(exampleMessages);
+    const variables = { examples: examples };
+
+    return TemplateEngine.substitute(EXAMPLE_MESSAGES_TEMPLATE, variables);
+  }
+
+  buildDynamicHistorySection(conversationHistory, tokenBudget) {
+    if (!conversationHistory || conversationHistory.length === 0 || tokenBudget <= 0) {
+      return '';
+    }
+
+    let messages = '';
+    let currentTokens = TemplateEngine.estimateTokenCount('## Conversation History:\n');
+    let includedMessages = 0;
+
+    for (const message of conversationHistory) {
+      let messageText = `${message.author || 'User'}: ${message.content || ''}\n`;
+
+      // Add image analysis if present
+      if (message.imageAnalysis && Array.isArray(message.imageAnalysis)) {
+        const imageContext = message.imageAnalysis.map(analysis =>
+          `[Image: ${analysis.analysis.substring(0, 200)}...]`
+        ).join(' ');
+        messageText = `${message.author || 'User'}: ${message.content || ''} ${imageContext}\n`;
+      }
+
+      const messageTokens = TemplateEngine.estimateTokenCount(messageText);
+
+      if (currentTokens + messageTokens > tokenBudget) {
+        break;
+      }
+
+      messages += messageText;
+      currentTokens += messageTokens;
+      includedMessages++;
+    }
+
+    if (includedMessages === 0) return '';
+
+    const variables = { messages: messages };
+    return TemplateEngine.substitute(CONVERSATION_HISTORY_TEMPLATE, variables);
+  }
+
+  buildReplyToSection(currentMessage) {
+    if (!currentMessage) return '';
+
+    // Use batched content if available, otherwise use regular content
+    let messageContent = currentMessage.batchedContent || currentMessage.content || '';
+
+    if (currentMessage.imageAnalysis && Array.isArray(currentMessage.imageAnalysis)) {
+      const imageContext = currentMessage.imageAnalysis.map(analysis =>
+        `[Image: ${analysis.analysis.substring(0, 100)}...]`
+      ).join(' ');
+      messageContent = `${messageContent} ${imageContext}`.trim();
+    }
+
+    const variables = {
+      authorUsername: currentMessage.author?.username || 'User',
+      messageContent: messageContent
+    };
+
+    return TemplateEngine.substitute(REPLY_TO_TEMPLATE, variables);
+  }
+
+  cleanExampleMessages(exampleMessages) {
+    const lines = exampleMessages.trim().split('\n').filter(line => line.trim());
+    const cleanedExamples = [];
+
+    lines.forEach(line => {
+      let cleaned = line.trim()
+        .replace(/^[A-Za-z\s]*\([^)]*\):\s*/gi, '') // Remove "Name (emotion):"
+        .replace(/^[A-Za-z\s]*:\s*/gi, '') // Remove "Name:"
+        .replace(/\*[^*]*\*/g, '') // Remove *actions*
+        .replace(/^["']|["']$/g, '') // Remove surrounding quotes
+        .trim();
+
+      if (cleaned) {
+        cleanedExamples.push(`Example: ${cleaned}`);
+      }
+    });
+
+    return cleanedExamples.join('\n') + '\n';
+  }
+
+  countMessagesInHistory(historySection) {
+    if (!historySection) return 0;
+    const lines = historySection.split('\n').filter(line => line.includes(':') && line.trim() !== '');
+    return Math.max(0, lines.length - 1);
+  }
+
+  // === UTILITY METHODS ===
+
+  validateTokenLimits(context) {
+    const result = this.buildCharacterPrompt(context);
+    const { totalTokens, contextLimit, availableTokens } = result.metadata;
+
+    return {
+      isValid: totalTokens <= availableTokens,
+      usage: {
+        used: totalTokens,
+        available: availableTokens,
+        limit: contextLimit,
+        percentage: Math.round((totalTokens / availableTokens) * 100)
+      },
+      recommendations: this.getTokenRecommendations(result.metadata)
+    };
+  }
+
+  getTokenRecommendations(metadata) {
+    const recommendations = [];
+    const { totalTokens, availableTokens, baseTokens, historyTokens } = metadata;
+    const usage = totalTokens / availableTokens;
+
+    if (usage > 0.9) {
+      recommendations.push('Consider increasing context limit or reducing system prompt length');
+    }
+
+    if (baseTokens > availableTokens * 0.5) {
+      recommendations.push('System prompt and character description are using over 50% of available tokens');
+    }
+
+    if (historyTokens < 100 && metadata.messagesIncluded < 3) {
+      recommendations.push('Very limited conversation history due to token constraints');
+    }
+
+    return recommendations;
+  }
+
+  // === MISSING PROMPT METHODS ===
+
+  buildAggressiveDecisionPrompt(message, channelContext) {
+    // More aggressive version with higher engagement threshold
+    const prompt = this.buildQuickDecisionPrompt(message, channelContext);
+    return prompt.replace(
+      'Don\'t respond to every message (be selective like a human)',
+      'Be more willing to engage in conversation and respond actively'
+    );
+  }
+
+  buildImageFocusedDecisionPrompt(message, channelContext) {
+    // Image-focused decision making
+    const prompt = this.buildQuickDecisionPrompt(message, channelContext);
+    return prompt.replace(
+      'Images often warrant some kind of response or reaction',
+      'Images shared deserve attention - prioritize reacting or commenting on visual content'
+    );
+  }
+
+  timeSinceLastAction() {
+    return TemplateEngine.getTimeSinceLastAction({});
   }
 }
 

@@ -25,7 +25,7 @@ class ResponseAction {
 
         logger.success('Response action completed (normal send)', {
           source: 'discord',
-          channel: message.channel.name,
+          channel: message.channel?.name || 'Unknown',
           responseLength: result.response.length
         });
 
@@ -37,7 +37,7 @@ class ResponseAction {
       logger.error('Response action failed', {
         source: 'discord',
         error: error.message,
-        channel: message.channel.name
+        channel: message.channel?.name || 'Unknown'
       });
       return { success: false, error: error.message };
     }
@@ -58,7 +58,7 @@ class ResponseAction {
 
         logger.success('Reply action completed (Discord reply)', {
           source: 'discord',
-          channel: message.channel.name,
+          channel: message.channel?.name || 'Unknown',
           responseLength: result.response.length
         });
 
@@ -70,22 +70,43 @@ class ResponseAction {
       logger.error('Reply action failed', {
         source: 'discord',
         error: error.message,
-        channel: message.channel.name
+        channel: message.channel?.name || 'Unknown'
       });
       return { success: false, error: error.message };
     }
   }
 
   async sendResponseWithDecision(message, result, decision) {
-    // Use normal channel.send for 'respond', Discord reply for 'reply'
-    if (decision.action === 'reply') {
-      const response = await message.reply(result.response);
-      this.conversationManager.addMessage(response, true);
-      return response;
-    } else {
-      const response = await message.channel.send(result.response);
-      this.conversationManager.addMessage(response, true);
-      return response;
+    try {
+      if (decision.action === 'reply') {
+        // Should now work since we preserved the original Discord.js message
+        const response = await message.reply(result.response);
+        this.conversationManager.addMessage(response, true);
+        return response;
+      } else {
+        // Normal channel send
+        const response = await message.channel.send(result.response);
+        this.conversationManager.addMessage(response, true);
+        return response;
+      }
+    } catch (error) {
+      logger.error('Failed to send response', {
+        source: 'discord',
+        error: error.message,
+        action: decision.action,
+        hasReplyMethod: typeof message.reply === 'function',
+        hasChannel: !!message.channel,
+        messageId: message.id
+      });
+      
+      // Fallback to normal send if reply fails
+      try {
+        const response = await message.channel.send(result.response);
+        this.conversationManager.addMessage(response, true);
+        return response;
+      } catch (sendError) {
+        throw new Error(`Both reply and send failed: ${error.message}, ${sendError.message}`);
+      }
     }
   }
 }

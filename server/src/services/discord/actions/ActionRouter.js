@@ -34,12 +34,27 @@ class ActionRouter {
   }
 
   async routeAction(decision, message) {
+    // Safety check: Tool actions should not reach ActionRouter
+    if (this.isToolAction(decision.action)) {
+      logger.warn('Tool action reached ActionRouter - this should be handled by ToolExecutor', {
+        source: 'discord',
+        action: decision.action,
+        messageId: message.id,
+        suggestion: 'Check decision chain logic'
+      });
+      
+      // Convert to ignore action as safety fallback
+      return await this.actions.get('ignore').executeIgnore(message, 
+        `Tool action '${decision.action}' improperly reached ActionRouter`);
+    }
+
     const actionHandler = this.actions.get(decision.action);
     
     if (!actionHandler) {
       logger.warn('Unknown action type', {
         source: 'discord',
-        action: decision.action
+        action: decision.action,
+        availableActions: Array.from(this.actions.keys())
       });
       return { success: false, error: 'Unknown action' };
     }
@@ -64,6 +79,11 @@ class ActionRouter {
       default:
         return { success: false, error: 'Unhandled action type' };
     }
+  }
+
+  isToolAction(action) {
+    const toolActions = ['profile_lookup'];
+    return toolActions.includes(action);
   }
 
   getSupportedActions() {

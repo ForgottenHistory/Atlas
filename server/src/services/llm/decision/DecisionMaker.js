@@ -75,6 +75,41 @@ class DecisionMaker {
     }
   }
 
+  // NEW METHOD: Tool-enhanced decision making
+  async makeToolEnhancedDecision(message, channelContext, toolResults, actionHistory) {
+    try {
+      const prompt = this.promptBuilder.buildToolDecisionPrompt(message, channelContext, toolResults, actionHistory);
+      const decisionSettings = this.getDecisionSettings();
+      
+      logger.debug('Making tool-enhanced decision', {
+        source: 'llm',
+        task: 'tool_enhanced_decision',
+        provider: decisionSettings.provider,
+        model: decisionSettings.model,
+        toolResultsCount: toolResults ? toolResults.length : 0,
+        actionHistoryLength: actionHistory ? actionHistory.length : 0
+      });
+      
+      const result = await this.llmService.generateCustomResponse(prompt, decisionSettings);
+
+      if (result.success) {
+        const DecisionParser = require('./DecisionParser');
+        const parser = new DecisionParser();
+        return parser.parseDecisionResponse(result.response);
+      }
+
+      return this.getDefaultDecision();
+    } catch (error) {
+      logger.error('Tool-enhanced decision failed', {
+        source: 'llm',
+        task: 'tool_enhanced_decision',
+        error: error.message,
+        fallback: 'ignore'
+      });
+      return this.getDefaultDecision();
+    }
+  }
+
   async analyzeChannelActivity(analysisContext) {
     try {
       const prompt = this.promptBuilder.buildChannelAnalysisPrompt(analysisContext);
@@ -226,8 +261,11 @@ class DecisionMaker {
   getDefaultDecision() {
     return {
       action: 'ignore',
-      confidence: 0,
-      reasoning: 'Default fallback decision'
+      confidence: 0.1,
+      reasoning: 'Default fallback decision',
+      emoji: null,
+      status: null,
+      targetUser: null
     };
   }
 }

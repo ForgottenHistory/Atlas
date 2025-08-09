@@ -59,19 +59,6 @@ class QueueMonitoringService {
     const hasActivity = Object.values(stats.types).some(type => 
       type.queued > 0 || type.active > 0
     );
-    
-    if (hasActivity) {
-      logger.info('Broadcasting queue activity to clients', {
-        source: 'system',
-        totalQueued: health.totalQueued,
-        activeGlobal: health.activeGlobal,
-        connectedClients: this.io.engine.clientsCount,
-        types: Object.entries(stats.types)
-          .filter(([_, type]) => type.queued > 0 || type.active > 0)
-          .map(([name, type]) => `${name}: ${type.active}/${type.limit} active, ${type.queued} queued`)
-          .join(', ')
-      });
-    }
   }
 
   stopMonitoring() {

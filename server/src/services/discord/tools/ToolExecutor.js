@@ -109,11 +109,29 @@ class ToolExecutor {
   }
 
   buildToolContext(toolAction, message, additionalContext) {
+    // Defensive programming: ensure message properties exist
+    const safeMessage = message || {};
+    const safeChannel = safeMessage.channel || {};
+    const safeAuthor = safeMessage.author || {};
+    const safeGuild = safeMessage.guild || null;
+
     const context = {
-      message: message,
-      channel: message.channel,
-      guild: message.guild,
-      author: message.author,
+      message: {
+        id: safeMessage.id || 'unknown',
+        content: safeMessage.content || '',
+        author: {
+          username: safeAuthor.username || 'Unknown',
+          id: safeAuthor.id || 'unknown'
+        },
+        channel: {
+          id: safeChannel.id || 'unknown',
+          name: safeChannel.name || 'Unknown'
+        },
+        guild: safeGuild
+      },
+      channel: safeChannel,
+      guild: safeGuild,
+      author: safeAuthor,
       discordClient: this.discordClient,
       conversationManager: this.conversationManager,
       ...additionalContext

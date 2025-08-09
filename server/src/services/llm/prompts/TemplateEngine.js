@@ -13,16 +13,25 @@ class TemplateEngine {
   }
 
   static buildContextVariables(message, channelContext, persona) {
+    // Defensive: ensure message and nested properties exist
+    const safeMessage = message || {};
+    const safeAuthor = safeMessage.author || {};
+    const safeChannelContext = channelContext || {};
+    const safePersona = persona || {};
+
+    // Use batched content if available, otherwise use regular content
+    const messageContent = safeMessage.batchedContent || safeMessage.content || '';
+
     return {
-      characterName: persona.name || 'Atlas',
-      characterDescription: persona.description || 'A helpful, engaging bot',
-      channelName: channelContext.channelName || 'unknown',
-      serverName: channelContext.serverName || 'unknown',
-      activityLevel: channelContext.activityLevel || 'normal',
-      lastAction: channelContext.lastAction || 'none',
-      timeSinceLastAction: this.getTimeSinceLastAction(channelContext),
-      authorUsername: message.author.username || 'User',
-      messageContent: message.content || ''
+      characterName: safePersona.name || 'Atlas',
+      characterDescription: safePersona.description || 'A helpful, engaging bot',
+      channelName: safeChannelContext.channelName || 'unknown',
+      serverName: safeChannelContext.serverName || 'unknown',
+      activityLevel: safeChannelContext.activityLevel || 'normal',
+      lastAction: safeChannelContext.lastAction || 'none',
+      timeSinceLastAction: this.getTimeSinceLastAction(safeChannelContext),
+      authorUsername: safeAuthor.username || 'User',
+      messageContent: messageContent
     };
   }
 
@@ -32,24 +41,31 @@ class TemplateEngine {
     }
 
     const recentMessages = conversationHistory.slice(-3);
-    const messageLines = recentMessages.map(msg => 
-      `${msg.author}: ${msg.content.substring(0, 100)}${msg.content.length > 100 ? '...' : ''}`
-    );
+    const messageLines = recentMessages.map(msg => {
+      const author = msg.author || 'Unknown';
+      const content = msg.content || '';
+      const truncated = content.length > 100 ? content.substring(0, 100) + '...' : content;
+      return `${author}: ${truncated}`;
+    });
 
     return `\nRECENT CONVERSATION:\n${messageLines.join('\n')}\n`;
   }
 
   static buildImageContext(message, channelContext) {
-    if (!channelContext.hasImages || !message.imageAnalysis) {
+    // Defensive: ensure message and channelContext exist
+    const safeMessage = message || {};
+    const safeChannelContext = channelContext || {};
+    
+    if (!safeChannelContext.hasImages || !safeMessage.imageAnalysis) {
       return '';
     }
 
-    const analyses = Array.isArray(message.imageAnalysis) 
-      ? message.imageAnalysis 
-      : [message.imageAnalysis];
+    const analyses = Array.isArray(safeMessage.imageAnalysis) 
+      ? safeMessage.imageAnalysis 
+      : [safeMessage.imageAnalysis];
     
     const imageLines = analyses.map((analysis, index) => 
-      `Image ${index + 1}: ${analysis.analysis.substring(0, 200)}...`
+      `Image ${index + 1}: ${analysis.analysis ? analysis.analysis.substring(0, 200) + '...' : 'No analysis available'}`
     );
 
     return `\nIMAGES SHARED:\n${imageLines.join('\n')}\n`;
@@ -60,9 +76,11 @@ class TemplateEngine {
       return '';
     }
 
-    const resultLines = toolResults.map((result, index) => 
-      `${index + 1}. ${result.tool}: ${result.summary || result.data}`
-    );
+    const resultLines = toolResults.map((result, index) => {
+      const tool = result.tool || 'unknown';
+      const summary = result.summary || result.data || 'No result';
+      return `${index + 1}. ${tool}: ${summary}`;
+    });
 
     return `\nTOOL RESULTS:\n${resultLines.join('\n')}\n`;
   }
@@ -72,9 +90,11 @@ class TemplateEngine {
       return '';
     }
 
-    const actionLines = previousActions.map((action, index) => 
-      `${index + 1}. ${action.action} - ${action.reasoning}`
-    );
+    const actionLines = previousActions.map((action, index) => {
+      const actionType = action.action || 'unknown';
+      const reasoning = action.reasoning || 'No reasoning provided';
+      return `${index + 1}. ${actionType} - ${reasoning}`;
+    });
 
     return `\nPREVIOUS ACTIONS IN THIS CHAIN:\n${actionLines.join('\n')}\n`;
   }

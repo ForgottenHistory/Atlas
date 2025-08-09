@@ -4,83 +4,83 @@ class DecisionParser {
   parseDecisionResponse(response) {
     try {
       const lines = response.split('\n').map(line => line.trim());
+      
       const decision = {
         action: 'ignore',
         confidence: 0.1,
         reasoning: 'Failed to parse decision',
         emoji: null,
-        status: null
+        status: null,
+        targetUser: null  // New field for tool actions
       };
 
       for (const line of lines) {
         if (line.startsWith('ACTION:')) {
-          const action = line.split(':')[1].trim().toLowerCase();
-          if (['respond', 'reply', 'react', 'ignore', 'status_change'].includes(action)) {
+          const action = line.replace('ACTION:', '').trim().toLowerCase();
+          if (this.isValidAction(action)) {
             decision.action = action;
           }
         } else if (line.startsWith('CONFIDENCE:')) {
-          const conf = parseFloat(line.split(':')[1].trim());
-          if (!isNaN(conf) && conf >= 0 && conf <= 1) {
-            decision.confidence = conf;
+          const confidence = parseFloat(line.replace('CONFIDENCE:', '').trim());
+          if (!isNaN(confidence) && confidence >= 0 && confidence <= 1) {
+            decision.confidence = confidence;
           }
         } else if (line.startsWith('REASONING:')) {
-          decision.reasoning = line.split(':')[1].trim();
+          decision.reasoning = line.replace('REASONING:', '').trim();
         } else if (line.startsWith('EMOJI:')) {
-          const emoji = line.split(':')[1].trim();
+          const emoji = line.replace('EMOJI:', '').trim();
           if (emoji && emoji !== '') {
             decision.emoji = emoji;
           }
         } else if (line.startsWith('STATUS:')) {
-          const status = line.split(':')[1].trim().toLowerCase();
+          const status = line.replace('STATUS:', '').trim().toLowerCase();
           if (['online', 'away', 'dnd', 'invisible'].includes(status)) {
             decision.status = status;
+          }
+        } else if (line.startsWith('TARGET_USER:')) {
+          const targetUser = line.replace('TARGET_USER:', '').trim();
+          if (targetUser && targetUser !== '') {
+            decision.targetUser = targetUser;
           }
         }
       }
 
-      logger.debug('Decision parsed successfully', {
-        source: 'llm',
-        decision: decision
-      });
+      // Validate tool-specific requirements
+      if (decision.action === 'profile_lookup' && !decision.targetUser) {
+        logger.warn('profile_lookup action missing targetUser, defaulting to ignore', {
+          source: 'llm',
+          originalAction: decision.action
+        });
+        decision.action = 'ignore';
+        decision.reasoning = 'profile_lookup requires targetUser';
+      }
 
       return decision;
     } catch (error) {
       logger.error('Failed to parse decision response', {
         source: 'llm',
         error: error.message,
-        response: response
+        response: response.substring(0, 200)
       });
       return this.getDefaultDecision();
     }
   }
 
-  parseChannelAnalysis(response) {
-    try {
-      const lines = response.split('\n').map(line => line.trim());
-      const analysis = {
-        shouldEngage: false,
-        confidence: 0,
-        reasoning: 'Failed to parse'
-      };
+  isValidAction(action) {
+    const validActions = [
+      'respond', 
+      'reply', 
+      'react', 
+      'ignore', 
+      'status_change',
+      'profile_lookup'  // New tool action
+    ];
+    return validActions.includes(action);
+  }
 
-      for (const line of lines) {
-        if (line.startsWith('ENGAGE:')) {
-          const engage = line.split(':')[1].trim().toLowerCase();
-          analysis.shouldEngage = engage === 'yes';
-        } else if (line.startsWith('CONFIDENCE:')) {
-          const conf = parseFloat(line.split(':')[1].trim());
-          if (!isNaN(conf)) {
-            analysis.confidence = conf;
-          }
-        } else if (line.startsWith('REASONING:')) {
-          analysis.reasoning = line.split(':')[1].trim();
-        }
-      }
-
-      return analysis;
-    } catch (error) {
-      return { shouldEngage: false, confidence: 0, reasoning: 'Parse error' };
-    }
+  isToolAction(action) {
+    const toolActions = ['profile_lookup'];
+    return toolActions.includes(action);
   }
 
   parseBatchDecisions(response) {
@@ -121,7 +121,8 @@ class DecisionParser {
         messageIndex: messageNum - 1, // Convert to 0-based index
         action: 'ignore',
         confidence: 0.1,
-        reasoning: 'Unknown'
+        reasoning: 'Unknown',
+        targetUser: null
       };
 
       // Parse ACTION=value
@@ -142,6 +143,12 @@ class DecisionParser {
         decision.reasoning = reasoningMatch[1].trim();
       }
 
+      // Parse TARGET_USER=value for tool actions
+      const targetUserMatch = content.match(/TARGET_USER=(\S+)/);
+      if (targetUserMatch) {
+        decision.targetUser = targetUserMatch[1];
+      }
+
       return decision;
     } catch (error) {
       logger.error('Failed to parse batch decision line', {
@@ -159,12 +166,13 @@ class DecisionParser {
       confidence: 0.1,
       reasoning: 'Default fallback decision',
       emoji: null,
-      status: null
+      status: null,
+      targetUser: null
     };
   }
 
   validateDecision(decision) {
-    const validActions = ['respond', 'reply', 'react', 'ignore', 'status_change'];
+    const validActions = ['respond', 'reply', 'react', 'ignore', 'status_change', 'profile_lookup'];
     const issues = [];
 
     if (!decision.action || !validActions.includes(decision.action)) {
@@ -187,6 +195,10 @@ class DecisionParser {
       issues.push('Status change action requires status');
     }
 
+    if (decision.action === 'profile_lookup' && !decision.targetUser) {
+      issues.push('Profile lookup action requires targetUser');
+    }
+
     return {
       isValid: issues.length === 0,
       issues: issues
@@ -201,6 +213,7 @@ class DecisionParser {
       reasoning: decision.reasoning || 'No reasoning provided',
       emoji: decision.emoji || null,
       status: decision.status || null,
+      targetUser: decision.targetUser || null,
       timestamp: new Date().toISOString()
     };
   }
@@ -218,6 +231,10 @@ class DecisionParser {
 
     if (decision.status) {
       summary.status = decision.status;
+    }
+
+    if (decision.targetUser) {
+      summary.targetUser = decision.targetUser;
     }
 
     return summary;
@@ -257,9 +274,18 @@ class DecisionParser {
     let action = 'ignore';
     let confidence = 0.3;
     let reasoning = 'Fuzzy parsing attempt';
+    let targetUser = null;
 
     // Look for action keywords
-    if (lowerResponse.includes('respond') || lowerResponse.includes('answer')) {
+    if (lowerResponse.includes('profile') || lowerResponse.includes('lookup') || lowerResponse.includes('user info')) {
+      action = 'profile_lookup';
+      confidence = 0.5;
+      // Try to extract username
+      const userMatch = response.match(/@(\w+)|user[:\s]+(\w+)|about\s+(\w+)/i);
+      if (userMatch) {
+        targetUser = userMatch[1] || userMatch[2] || userMatch[3];
+      }
+    } else if (lowerResponse.includes('respond') || lowerResponse.includes('answer')) {
       action = 'respond';
       confidence = 0.6;
     } else if (lowerResponse.includes('reply')) {
@@ -281,7 +307,8 @@ class DecisionParser {
       confidence,
       reasoning,
       emoji: null,
-      status: null
+      status: null,
+      targetUser
     };
   }
 }

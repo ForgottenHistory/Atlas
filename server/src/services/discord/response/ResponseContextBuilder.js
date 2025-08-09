@@ -8,6 +8,9 @@ class ResponseContextBuilder {
     const llmSettings = settings.llm || {};
     const conversationHistory = conversationManager.getHistory(message.channel.id);
 
+    // Use batched content if available, otherwise use regular content
+    const messageContent = message.batchedContent || message.content || '';
+
     return {
       systemPrompt: llmSettings.systemPrompt || settings.systemPrompt,
       characterName: persona.name || 'Bot',
@@ -17,7 +20,7 @@ class ResponseContextBuilder {
       llmSettings: llmSettings,
       // FIXED: Pass the actual current message being responded to
       currentMessage: {
-        content: message.content,
+        content: messageContent,
         author: {
           username: message.author?.username || 'Unknown'
         },
