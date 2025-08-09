@@ -4,7 +4,7 @@ class ConversationHistoryLoader {
   constructor(discordClient, messageFilter = null) {
     this.discordClient = discordClient;
     this.messageFilter = messageFilter;
-    this.maxAgeHours = 10; // Don't load messages older than 2 hours
+    this.maxAgeHours = 10; // Don't load messages older than 10 hours
     this.maxMessages = 50; // Maximum messages to load per channel
   }
 
@@ -63,19 +63,30 @@ class ConversationHistoryLoader {
           continue;
         }
 
-        // Skip bot messages
-        if (message.author.bot) {
+        // FIXED: Only skip OTHER bots, but include our own bot's messages
+        // This preserves conversation context including bot responses
+        const isSelfBot = message.author.bot && message.author.id === client?.user?.id;
+        const isOtherBot = message.author.bot && message.author.id !== client?.user?.id;
+        
+        if (isOtherBot) {
+          // Skip other bots (but keep our own messages)
           continue;
         }
 
-        messagesToLoad.push(message);
+        // Add both user messages and our own bot messages
+        messagesToLoad.push({
+          message: message,
+          isBot: isSelfBot // Mark if this is our bot's message
+        });
       }
 
       // Sort messages by timestamp (oldest first for proper order)
-      messagesToLoad.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+      messagesToLoad.sort((a, b) => a.message.createdTimestamp - b.message.createdTimestamp);
 
       // Add messages to conversation manager
-      for (const message of messagesToLoad) {
+      for (const messageData of messagesToLoad) {
+        const { message, isBot } = messageData;
+        
         // Process message through filter if available (for embed processing)
         let processedMessage = message;
         
@@ -90,6 +101,7 @@ class ConversationHistoryLoader {
                   source: 'discord',
                   messageId: message.id,
                   author: message.author.username,
+                  isBot: isBot,
                   embedCount: filterResult.embedInfo?.count || 0,
                   originalLength: message.content?.length || 0,
                   processedLength: processedMessage.content?.length || 0
@@ -106,7 +118,8 @@ class ConversationHistoryLoader {
           }
         }
 
-        conversationManager.addMessage(processedMessage, false);
+        // Add message with correct isBot flag
+        conversationManager.addMessage(processedMessage, isBot);
         loadedCount++;
       }
 
@@ -116,6 +129,7 @@ class ConversationHistoryLoader {
         channelName: channel.name,
         messagesLoaded: loadedCount,
         totalFetched: messages.size,
+        includesBotMessages: true,
         cutoffTime: cutoffTime.toISOString()
       });
 

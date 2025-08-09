@@ -140,7 +140,6 @@ class MessageProcessor {
     }
   }
 
-  // Plugin-based message processing
   async processMessageWithPlugins(message) {
     try {
       logger.debug('Processing message with plugin system', {
@@ -149,37 +148,80 @@ class MessageProcessor {
         author: message.author?.username
       });
 
-      // FIX: Add user message to conversation history BEFORE processing
-      // This ensures conversation history is available for decision making
+      // STEP 1: Image processing (same as legacy)
+      let imageAnalysis = null;
+      if (message.attachments?.size > 0) {
+        try {
+          const llmSettings = storage.getLLMSettings();
+          if (llmSettings.enable_image_analysis) {
+            imageAnalysis = await this.imageProcessor.analyzeMessageImages(message);
+            
+            // Attach image analysis to message for plugin system
+            message.imageAnalysis = imageAnalysis;
+            
+            logger.info('Images processed for plugin system', {
+              source: 'image_processing',
+              imageCount: imageAnalysis.length,
+              hasVisionConfig: !!llmSettings.image_provider,
+              hasApiKey: !!llmSettings.image_api_key,
+              hasModel: !!llmSettings.image_model
+            });
+          }
+        } catch (error) {
+          logger.error('Image processing failed in plugin system', {
+            source: 'image_processing',
+            error: error.message
+          });
+          // Continue processing without image analysis
+        }
+      }
+
+      // STEP 2: Add user message to conversation history FIRST
       this.conversationManager.addMessage(message, false);
 
-      logger.debug('Added user message to conversation history', {
-        source: 'discord',
-        messageId: message.id,
-        author: message.author?.username,
-        channelId: message.channel?.id
+      // STEP 3: Message batching with CORRECT method signature
+      await this.messageBatcher.addToBatch(message, async (batchedMessage) => {
+        try {
+          logger.debug('Processing batched message through plugin system', {
+            source: 'discord',
+            messageId: batchedMessage.id,
+            isBatched: batchedMessage.isBatched || false,
+            originalLength: message.content?.length || 0,
+            batchedLength: batchedMessage.batchedContent?.length || 0
+          });
+
+          // Process through plugin-enabled pipeline
+          const result = await PluginSystem.processMessage(batchedMessage);
+          
+          if (result.processed) {
+            logger.info('Message processed successfully with plugins', {
+              source: 'discord',
+              messageId: batchedMessage.id,
+              action: result.decision?.action,
+              processingTime: result.processingTime
+            });
+          } else {
+            logger.warn('Message processing failed with plugins, trying legacy fallback', {
+              source: 'discord',
+              messageId: batchedMessage.id,
+              reason: result.reason || result.error
+            });
+            
+            // Fallback to legacy if plugin processing fails
+            await this.processMessageLegacy(message);
+          }
+
+        } catch (error) {
+          logger.error('Plugin batched message processing failed, falling back to legacy', {
+            source: 'discord',
+            messageId: batchedMessage.id,
+            error: error.message
+          });
+          
+          // Fallback to legacy processing
+          await this.processMessageLegacy(message);
+        }
       });
-
-      // Process through plugin-enabled pipeline
-      const result = await PluginSystem.processMessage(message);
-
-      if (result.processed) {
-        logger.info('Message processed successfully with plugins', {
-          source: 'discord',
-          messageId: message.id,
-          action: result.decision?.action,
-          processingTime: result.processingTime
-        });
-      } else {
-        logger.warn('Message processing failed with plugins, trying legacy fallback', {
-          source: 'discord',
-          messageId: message.id,
-          reason: result.reason || result.error
-        });
-
-        // Fallback to legacy if plugin processing fails
-        await this.processMessageLegacy(message);
-      }
 
     } catch (error) {
       logger.error('Plugin message processing failed, falling back to legacy', {
@@ -187,7 +229,7 @@ class MessageProcessor {
         messageId: message.id,
         error: error.message
       });
-
+      
       // Fallback to legacy processing
       await this.processMessageLegacy(message);
     }

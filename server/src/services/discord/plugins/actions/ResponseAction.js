@@ -3,8 +3,8 @@ const TypingSimulator = require('../../actions/TypingSimulator');
 const logger = require('../../../logger/Logger');
 
 /**
- * Response action converted to plugin architecture
- * Handles generating and sending responses as normal messages
+ * Enhanced Response action with full Discord reply support
+ * Handles both normal messages and Discord replies based on configuration
  */
 class ResponseAction extends Action {
   constructor(config = {}, dependencies = {}) {
@@ -12,7 +12,12 @@ class ResponseAction extends Action {
     
     this.discordClient = dependencies.discordClient;
     this.responseGenerator = dependencies.responseGenerator;
+    this.conversationManager = dependencies.conversationManager;
     this.typingSimulator = new TypingSimulator();
+    
+    // Configuration flags
+    this.forceReply = config.forceReply || false;
+    this.enableTypingIndicator = config.enableTypingIndicator !== false;
     
     if (!this.discordClient) {
       throw new Error('ResponseAction requires discordClient dependency');
@@ -24,7 +29,7 @@ class ResponseAction extends Action {
   }
 
   /**
-   * Execute response action
+   * Execute response action - supports both normal and reply based on config/decision
    */
   async execute(context) {
     const { message, decision, originalMessage } = context;
@@ -36,8 +41,10 @@ class ResponseAction extends Action {
         return this.error(new Error('No Discord channel available for response'));
       }
 
-      // Add realistic typing delay
-      await this.typingSimulator.simulateTyping(discordMessage.channel);
+      // Add realistic typing delay if enabled
+      if (this.enableTypingIndicator) {
+        await this.typingSimulator.simulateTyping(discordMessage.channel);
+      }
 
       // Generate response using existing system
       const result = await this.responseGenerator.generateResponse(discordMessage);
@@ -46,26 +53,63 @@ class ResponseAction extends Action {
         return this.error(new Error(result.error || 'Response generation failed'));
       }
 
-      // Send as normal message (not a reply)
-      const sentMessage = await discordMessage.channel.send(result.response);
+      // Determine if we should use reply or normal send
+      const shouldReply = this.shouldUseReply(decision, discordMessage);
+      let sentMessage;
 
-      logger.success('Response action completed (normal send)', {
-        source: 'plugin',
-        plugin: this.name,
-        channel: discordMessage.channel?.name || 'Unknown',
-        responseLength: result.response.length,
-        messageId: sentMessage.id
-      });
+      if (shouldReply) {
+        // Use Discord's reply function
+        try {
+          sentMessage = await discordMessage.reply(result.response);
+          
+          logger.success('Response action completed (Discord reply)', {
+            source: 'plugin',
+            plugin: this.name,
+            channel: discordMessage.channel?.name || 'Unknown',
+            responseLength: result.response.length,
+            messageId: sentMessage.id,
+            repliedTo: discordMessage.id
+          });
+
+        } catch (replyError) {
+          logger.warn('Discord reply failed, falling back to normal send', {
+            source: 'plugin',
+            plugin: this.name,
+            error: replyError.message,
+            messageId: discordMessage.id
+          });
+          
+          // Fallback to normal send
+          sentMessage = await discordMessage.channel.send(result.response);
+        }
+      } else {
+        // Normal channel send
+        sentMessage = await discordMessage.channel.send(result.response);
+        
+        logger.success('Response action completed (normal send)', {
+          source: 'plugin',
+          plugin: this.name,
+          channel: discordMessage.channel?.name || 'Unknown',
+          responseLength: result.response.length,
+          messageId: sentMessage.id
+        });
+      }
+
+      // Add bot response to conversation history
+      if (this.conversationManager) {
+        this.conversationManager.addMessage(sentMessage, true);
+      }
 
       return this.success({
-        action: 'respond',
+        action: shouldReply ? 'reply' : 'respond',
         sentMessage: {
           id: sentMessage.id,
           content: sentMessage.content,
           timestamp: sentMessage.createdTimestamp
         },
         originalResponse: result.response,
-        responseType: 'normal_send'
+        responseType: shouldReply ? 'discord_reply' : 'normal_send',
+        repliedTo: shouldReply ? discordMessage.id : null
       });
 
     } catch (error) {
@@ -78,6 +122,27 @@ class ResponseAction extends Action {
       
       return this.error(error);
     }
+  }
+
+  /**
+   * Determine whether to use Discord's reply function
+   */
+  shouldUseReply(decision, discordMessage) {
+    // If config forces reply mode
+    if (this.forceReply) {
+      return true;
+    }
+
+    // If decision explicitly specifies reply action
+    if (decision?.action === 'reply') {
+      return true;
+    }
+
+    // Smart logic: Use reply for recent messages (within 2 minutes)
+    const messageAge = Date.now() - discordMessage.createdTimestamp;
+    const isRecent = messageAge < 120000; // 2 minutes
+
+    return isRecent;
   }
 
   /**
@@ -110,11 +175,13 @@ class ResponseAction extends Action {
     return {
       name: 'ResponseAction',
       type: 'action',
-      description: 'Generates and sends responses as normal Discord messages',
+      description: 'Generates and sends responses as Discord messages or replies',
       discordPermissions: ['SendMessages'],
-      discordFeatures: ['messages', 'typing_indicator'],
+      discordFeatures: ['messages', 'replies', 'typing_indicator'],
       estimatedExecutionTime: '2-5s',
-      rateLimitSensitive: true
+      rateLimitSensitive: true,
+      supportsReply: true,
+      supportsNormalSend: true
     };
   }
 
@@ -144,54 +211,6 @@ class ResponseAction extends Action {
     }
 
     return result;
-  }
-
-  /**
-   * Handle pre-execution setup
-   */
-  async onBeforeExecute(context) {
-    await super.onBeforeExecute(context);
-    
-    // Log execution start
-    logger.debug('Response action starting', {
-      source: 'plugin',
-      plugin: this.name,
-      messageId: context.message?.id,
-      hasDecision: !!context.decision
-    });
-  }
-
-  /**
-   * Handle post-execution cleanup
-   */
-  async onAfterExecute(context, result) {
-    await super.onAfterExecute(context, result);
-    
-    // Additional response-specific logging
-    if (result.success) {
-      logger.info('Response sent successfully', {
-        source: 'plugin',
-        plugin: this.name,
-        responseLength: result.data?.originalResponse?.length || 0,
-        sentMessageId: result.data?.sentMessage?.id
-      });
-    }
-  }
-
-  /**
-   * Handle execution errors
-   */
-  async onError(context, error) {
-    // Don't re-throw, just log and count
-    logger.error('Response action error', {
-      source: 'plugin',
-      plugin: this.name,
-      error: error.message,
-      messageId: context.message?.id
-    });
-    
-    // Update error count in parent
-    await super.onError(context, error);
   }
 }
 

@@ -10,7 +10,7 @@ const logger = require('../../logger/Logger');
  * Coordinates plugin loading and integration with existing services
  */
 class PluginSystem {
-  
+
   constructor() {
     this.initialized = false;
     this.messagePipeline = null;
@@ -18,61 +18,145 @@ class PluginSystem {
   }
 
   /**
-   * Initialize the plugin system with Atlas dependencies
-   */
-  async initialize(atlasDependencies = {}) {
-    logger.info('Initializing Atlas plugin system', {
-      source: 'plugin_system'
-    });
-
+     * Initialize the plugin system with Atlas dependencies
+     */
+  async initialize(dependencies = {}) {
     try {
-      // Store Atlas dependencies
-      this.storeDependencies(atlasDependencies);
-
-      // Load all plugins
-      const loadResults = await PluginLoader.loadAllPlugins(
-        Object.fromEntries(this.dependencies)
-      );
-
-      // Initialize message pipeline with plugin support
-      this.messagePipeline = new MessagePipeline({
-        discordClient: this.dependencies.get('discordClient'),
-        llmService: this.dependencies.get('llmService'),
-        conversationManager: this.dependencies.get('conversationManager'),
-        responseGenerator: this.dependencies.get('responseGenerator'),
-        messageFilter: this.dependencies.get('messageFilter'),
-        actionExecutor: this.dependencies.get('actionExecutor'),
-        channelManager: this.dependencies.get('channelManager') // Add channelManager
+      logger.info('Initializing plugin system with Atlas dependencies', {
+        source: 'plugin_system',
+        dependencies: Object.keys(dependencies)
       });
 
-      // Setup event listeners
-      this.setupEventListeners();
+      // Store dependencies for plugin injection
+      this.dependencies = new Map(Object.entries(dependencies));
+
+      // NOTE: PluginRegistry and EventBus are singletons, no initialize() needed
+      // They're ready to use immediately
+
+      // Load plugins with dependencies
+      const loadResult = await PluginLoader.loadAllPlugins(dependencies);
+
+      if (loadResult.failed > 0) {
+        logger.warn('Some plugins failed to load', {
+          source: 'plugin_system',
+          failed: loadResult.failed,
+          loaded: loadResult.loaded,
+          errors: loadResult.errors
+        });
+      }
+
+      // Initialize message pipeline with dependencies
+      this.messagePipeline = new MessagePipeline(dependencies);
+
+      // Initialize decision pipeline
+      const DecisionPipeline = require('./DecisionPipeline');
+      this.decisionPipeline = new DecisionPipeline(dependencies);
+
+      // NEW: Load conversation history for active channels
+      await this.loadConversationHistory(dependencies);
 
       this.initialized = true;
 
       logger.success('Plugin system initialized successfully', {
         source: 'plugin_system',
-        pluginsLoaded: loadResults.loaded,
-        pluginsFailed: loadResults.failed
+        pluginsLoaded: loadResult.loaded,
+        pluginsFailed: loadResult.failed,
+        dependenciesCount: this.dependencies.size
       });
 
       return {
         success: true,
-        pluginsLoaded: loadResults.loaded,
-        pluginsFailed: loadResults.failed,
-        errors: loadResults.errors
+        pluginsLoaded: loadResult.loaded,
+        pluginsFailed: loadResult.failed
       };
 
     } catch (error) {
       logger.error('Failed to initialize plugin system', {
         source: 'plugin_system',
-        error: error.message
+        error: error.message,
+        stack: error.stack
       });
 
       return {
         success: false,
         error: error.message
       };
+    }
+  }
+
+  /**
+   * NEW: Load conversation history for active channels on startup
+   */
+  async loadConversationHistory(dependencies) {
+    try {
+      const { discordClient, conversationManager, channelManager, messageFilter } = dependencies;
+
+      if (!discordClient || !conversationManager || !channelManager) {
+        logger.warn('Missing dependencies for conversation history loading', {
+          source: 'plugin_system',
+          hasDiscordClient: !!discordClient,
+          hasConversationManager: !!conversationManager,
+          hasChannelManager: !!channelManager
+        });
+        return;
+      }
+
+      // Import ConversationHistoryLoader
+      const ConversationHistoryLoader = require('../conversation/ConversationHistoryLoader');
+
+      // Initialize history loader
+      const historyLoader = new ConversationHistoryLoader(discordClient, messageFilter);
+
+      // Get active channels
+      const activeChannels = channelManager.getActiveChannelsList();
+
+      if (activeChannels.length === 0) {
+        logger.info('No active channels for conversation history loading', {
+          source: 'plugin_system'
+        });
+        return;
+      }
+
+      logger.info('Loading conversation history for active channels', {
+        source: 'plugin_system',
+        channelCount: activeChannels.length
+      });
+
+      // Load history for each active channel
+      let successCount = 0;
+      for (const channel of activeChannels) {
+        try {
+          const loaded = await historyLoader.loadRecentHistory(channel.id, conversationManager);
+          if (loaded) {
+            successCount++;
+            logger.debug('Loaded conversation history', {
+              source: 'plugin_system',
+              channelId: channel.id,
+              channelName: channel.name
+            });
+          }
+        } catch (error) {
+          logger.warn('Failed to load history for channel', {
+            source: 'plugin_system',
+            channelId: channel.id,
+            channelName: channel.name,
+            error: error.message
+          });
+        }
+      }
+
+      logger.success('Conversation history loading completed', {
+        source: 'plugin_system',
+        totalChannels: activeChannels.length,
+        successfullyLoaded: successCount
+      });
+
+    } catch (error) {
+      logger.error('Conversation history loading failed', {
+        source: 'plugin_system',
+        error: error.message
+      });
+      // Don't fail initialization if history loading fails
     }
   }
 
@@ -93,7 +177,7 @@ class PluginSystem {
   addDependency(name, dependency) {
     this.dependencies.set(name, dependency);
     PluginLoader.addDependency(name, dependency);
-    
+
     // Update message pipeline dependencies
     if (this.messagePipeline) {
       this.messagePipeline.updateDependencies({ [name]: dependency });
@@ -115,12 +199,12 @@ class PluginSystem {
 
     try {
       await PluginLoader.reloadPlugin(pluginName);
-      
+
       logger.success('Plugin reloaded successfully', {
         source: 'plugin_system',
         pluginName
       });
-      
+
       return { success: true };
     } catch (error) {
       logger.error('Plugin reload failed', {
@@ -128,7 +212,7 @@ class PluginSystem {
         pluginName,
         error: error.message
       });
-      
+
       return { success: false, error: error.message };
     }
   }
@@ -164,17 +248,17 @@ class PluginSystem {
 
     try {
       const result = await PluginRegistry.executeTool(
-        toolName, 
-        context, 
+        toolName,
+        context,
         Object.fromEntries(this.dependencies)
       );
-      
+
       logger.debug('Manual tool execution completed', {
         source: 'plugin_system',
         toolName,
         success: result.success
       });
-      
+
       return result;
     } catch (error) {
       logger.error('Manual tool execution failed', {
@@ -182,7 +266,7 @@ class PluginSystem {
         toolName,
         error: error.message
       });
-      
+
       throw error;
     }
   }
@@ -201,13 +285,13 @@ class PluginSystem {
         context,
         Object.fromEntries(this.dependencies)
       );
-      
+
       logger.debug('Manual action execution completed', {
         source: 'plugin_system',
         actionName,
         success: result.success
       });
-      
+
       return result;
     } catch (error) {
       logger.error('Manual action execution failed', {
@@ -215,7 +299,7 @@ class PluginSystem {
         actionName,
         error: error.message
       });
-      
+
       throw error;
     }
   }
