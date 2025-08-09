@@ -92,7 +92,7 @@ class ImageAnalyzer {
 
       const prompt = customPrompt || 'What do you see in this image?';
       const result = await provider.analyzeImage(imageBuffer, prompt, {
-        apiKey: settings.apiKey,
+        api_key: settings.api_key,
         model: settings.model,
         quality: settings.quality,
         maxTokens: 500

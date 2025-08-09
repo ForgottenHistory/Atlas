@@ -10,7 +10,7 @@ class ImageConfigManager {
       enabled: !!(llmSettings.image_provider && llmSettings.image_model && llmSettings.image_api_key),
       provider: llmSettings.image_provider,
       model: llmSettings.image_model,
-      apiKey: llmSettings.image_api_key,
+      api_key: llmSettings.image_api_key,
       maxSize: llmSettings.image_max_size || 5,
       quality: llmSettings.image_quality || 2,
       gifFrameCount: llmSettings.gif_frame_count || 2
@@ -21,7 +21,7 @@ class ImageConfigManager {
     return {
       provider: '',
       model: '',
-      apiKey: '',
+      api_key: '',
       maxSize: 5,
       quality: 2,
       gifFrameCount: 2
@@ -30,7 +30,7 @@ class ImageConfigManager {
 
   validateSettings(settings) {
     if (!settings) return false;
-    if (!settings.provider || !settings.apiKey) return false;
+    if (!settings.provider || !settings.api_key) return false;
     return true;
   }
 
@@ -47,7 +47,7 @@ class ImageConfigManager {
     }
 
     return {
-      apiKey: settings.apiKey,
+      api_key: settings.api_key,
       model: settings.model,
       quality: settings.quality,
       maxSize: settings.maxSize
@@ -57,7 +57,7 @@ class ImageConfigManager {
   updateImageSettings(newSettings) {
     // This would integrate with the storage system to update LLM settings
     // For now, just validate the format
-    const requiredFields = ['provider', 'model', 'apiKey'];
+    const requiredFields = ['provider', 'model', 'api_key'];
     const missingFields = requiredFields.filter(field => !newSettings[field]);
 
     if (missingFields.length > 0) {

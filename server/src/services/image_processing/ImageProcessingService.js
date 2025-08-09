@@ -26,7 +26,7 @@ class ImageProcessingService {
         logger.warn('Image processing attempted without valid settings', {
           source: 'imageProcessing',
           hasProvider: !!settings.provider,
-          hasApiKey: !!settings.apiKey
+          hasApiKey: !!settings.api_key
         });
         return null;
       }

@@ -52,7 +52,7 @@ class ImageProcessor {
 
     // Analyze the frames with vision model
     const analysisSettings = {
-      apiKey: settings.apiKey,
+      api_key: settings.api_key,
       model: settings.model,
       quality: settings.quality || 2,
       maxTokens: Math.min(1500, (settings.maxTokens || 1000) + (frames.length * 200)), // More tokens for multiple frames
@@ -75,7 +75,7 @@ class ImageProcessor {
 
     // Analyze the image
     const analysisSettings = {
-      apiKey: settings.apiKey,
+      api_key: settings.api_key,
       model: settings.model,
       quality: settings.quality || 2,
       maxTokens: settings.maxTokens || 1000,

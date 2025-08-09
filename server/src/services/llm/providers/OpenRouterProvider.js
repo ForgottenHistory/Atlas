@@ -13,12 +13,12 @@ class OpenRouterProvider {
     });
   }
 
-  isAvailable(apiKey) {
-    return !!(apiKey && apiKey.trim());
+  isAvailable(api_key) {
+    return !!(api_key && api_key.trim());
   }
 
   async analyzeImage(imageBuffer, prompt, settings = {}) {
-    if (!this.isAvailable(settings.apiKey)) {
+    if (!this.isAvailable(settings.api_key)) {
       throw new Error('OpenRouter API key not provided');
     }
 
@@ -83,7 +83,7 @@ class OpenRouterProvider {
       const response = await fetch(`${this.baseURL}/chat/completions`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${settings.apiKey}`,
+          'Authorization': `Bearer ${settings.api_key}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': 'https://atlas-bot.local',
           'X-Title': 'Atlas Discord Bot'
@@ -138,7 +138,7 @@ class OpenRouterProvider {
   }
 
   async analyzeMultipleImages(frames, prompt, settings = {}) {
-    if (!this.isAvailable(settings.apiKey)) {
+    if (!this.isAvailable(settings.api_key)) {
       throw new Error('OpenRouter API key not provided');
     }
 
@@ -208,7 +208,7 @@ class OpenRouterProvider {
       const response = await fetch(`${this.baseURL}/chat/completions`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${settings.apiKey}`,
+          'Authorization': `Bearer ${settings.api_key}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': 'https://atlas-bot.local',
           'X-Title': 'Atlas Discord Bot'
@@ -263,15 +263,15 @@ class OpenRouterProvider {
     }
   }
 
-  async fetchAvailableModels(apiKey) {
-    if (!apiKey) {
+  async fetchAvailableModels(api_key) {
+    if (!api_key) {
       throw new Error('API key required to fetch models');
     }
 
     try {
       const response = await fetch(`${this.baseURL}/models`, {
         headers: {
-          'Authorization': `Bearer ${apiKey}`
+          'Authorization': `Bearer ${api_key}`
         }
       });
 
@@ -396,7 +396,7 @@ class OpenRouterProvider {
   validateSettings(settings) {
     const errors = [];
 
-    // Fix: Use api_key (underscore) instead of apiKey (camelCase)
+    // Fix: Use api_key (underscore) instead of api_key (camelCase)
     if (!settings.api_key || settings.api_key.trim() === '') {
       errors.push('API key is required');
     }
@@ -422,9 +422,9 @@ class OpenRouterProvider {
   }
 
   async generateResponse(prompt, settings = {}) {
-    const apiKey = settings.api_key;
+    const api_key = settings.api_key;
 
-    if (!apiKey) {
+    if (!api_key) {
       throw new Error('OpenRouter API key not provided');
     }
 
@@ -465,7 +465,7 @@ class OpenRouterProvider {
       const response = await fetch(`${this.baseURL}/chat/completions`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${api_key}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': 'https://atlas-bot.local',
           'X-Title': 'Atlas Discord Bot'

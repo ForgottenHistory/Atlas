@@ -145,54 +145,137 @@ class MessageProcessor {
       logger.debug('Processing message with plugin system', {
         source: 'discord',
         messageId: message.id,
-        author: message.author?.username
+        author: message.author?.username,
+        hasAttachments: message.attachments?.size > 0
       });
 
-      // STEP 1: Image processing (same as legacy)
+      // STEP 1: Image processing FIRST with FIXED method call
       let imageAnalysis = null;
+
+      logger.debug('Image processing check', {
+        source: 'discord',
+        messageId: message.id,
+        hasAttachments: !!message.attachments,
+        attachmentSize: message.attachments?.size || 0,
+        attachmentDetails: message.attachments ? Array.from(message.attachments.values()).map(att => ({
+          name: att.name,
+          contentType: att.contentType,
+          size: att.size,
+          url: att.url
+        })) : []
+      });
+
       if (message.attachments?.size > 0) {
+        logger.info('ENTERING image processing block', {
+          source: 'image_processing',
+          messageId: message.id,
+          attachmentCount: message.attachments.size
+        });
+
         try {
           const llmSettings = storage.getLLMSettings();
+
+          logger.debug('LLM Settings check', {
+            source: 'image_processing',
+            enableImageAnalysis: llmSettings.enable_image_analysis,
+            imageProvider: llmSettings.image_provider,
+            hasImageApiKey: !!llmSettings.image_api_key,
+            imageModel: llmSettings.image_model
+          });
+
           if (llmSettings.enable_image_analysis) {
-            imageAnalysis = await this.imageProcessor.analyzeMessageImages(message);
-            
-            // Attach image analysis to message for plugin system
-            message.imageAnalysis = imageAnalysis;
-            
-            logger.info('Images processed for plugin system', {
+            logger.info('CALLING imageProcessor.processMessageImages', {
               source: 'image_processing',
-              imageCount: imageAnalysis.length,
-              hasVisionConfig: !!llmSettings.image_provider,
-              hasApiKey: !!llmSettings.image_api_key,
-              hasModel: !!llmSettings.image_model
+              messageId: message.id,
+              attachmentCount: message.attachments.size
+            });
+
+            // FIXED: Use correct method name and add settings parameter
+            const imageSettings = {
+              provider: llmSettings.image_provider,
+              api_key: llmSettings.image_api_key,
+              model: llmSettings.image_model,
+              maxSize: llmSettings.image_max_size || 5,
+              quality: llmSettings.image_quality || 2,
+              gifFrameCount: llmSettings.gif_frame_count || 2
+            };
+
+            imageAnalysis = await this.imageProcessor.processMessageImages(message, imageSettings);
+
+            logger.info('IMAGE PROCESSING RESULT', {
+              source: 'image_processing',
+              messageId: message.id,
+              analysisResult: imageAnalysis,
+              analysisLength: imageAnalysis?.length || 0,
+              analysisType: typeof imageAnalysis
+            });
+
+            // CRITICAL: Attach image analysis to message BEFORE adding to history
+            if (imageAnalysis && imageAnalysis.length > 0) {
+              message.imageAnalysis = imageAnalysis;
+
+              logger.success('Image analysis attached to message', {
+                source: 'image_processing',
+                messageId: message.id,
+                analysisCount: imageAnalysis.length,
+                hasAnalysis: true
+              });
+            } else {
+              logger.warn('No image analysis generated', {
+                source: 'image_processing',
+                messageId: message.id,
+                analysisResult: imageAnalysis
+              });
+            }
+          } else {
+            logger.warn('Image analysis DISABLED in settings', {
+              source: 'image_processing',
+              messageId: message.id,
+              enableImageAnalysis: llmSettings.enable_image_analysis
             });
           }
         } catch (error) {
-          logger.error('Image processing failed in plugin system', {
+          logger.error('Image processing FAILED with error', {
             source: 'image_processing',
-            error: error.message
+            error: error.message,
+            stack: error.stack,
+            messageId: message.id,
+            attachmentCount: message.attachments?.size || 0
           });
           // Continue processing without image analysis
         }
+      } else {
+        logger.debug('NO ATTACHMENTS detected', {
+          source: 'discord',
+          messageId: message.id,
+          hasAttachments: !!message.attachments,
+          attachmentSize: message.attachments?.size || 0
+        });
       }
 
-      // STEP 2: Add user message to conversation history FIRST
-      this.conversationManager.addMessage(message, false);
+      // STEP 2: Add user message to conversation history WITH image analysis
+      const addedMessage = this.conversationManager.addMessage(message, false);
 
-      // STEP 3: Message batching with CORRECT method signature
+      logger.debug('Added user message with image analysis to history', {
+        source: 'discord',
+        messageId: message.id,
+        hasImageAnalysis: !!(message.imageAnalysis && message.imageAnalysis.length > 0),
+        analysisCount: message.imageAnalysis?.length || 0
+      });
+
+      // STEP 3: Message batching with CORRECT method signature  
       await this.messageBatcher.addToBatch(message, async (batchedMessage) => {
         try {
           logger.debug('Processing batched message through plugin system', {
             source: 'discord',
             messageId: batchedMessage.id,
             isBatched: batchedMessage.isBatched || false,
-            originalLength: message.content?.length || 0,
-            batchedLength: batchedMessage.batchedContent?.length || 0
+            hasImageAnalysis: !!(batchedMessage.imageAnalysis && batchedMessage.imageAnalysis.length > 0)
           });
 
           // Process through plugin-enabled pipeline
           const result = await PluginSystem.processMessage(batchedMessage);
-          
+
           if (result.processed) {
             logger.info('Message processed successfully with plugins', {
               source: 'discord',
@@ -206,7 +289,7 @@ class MessageProcessor {
               messageId: batchedMessage.id,
               reason: result.reason || result.error
             });
-            
+
             // Fallback to legacy if plugin processing fails
             await this.processMessageLegacy(message);
           }
@@ -217,7 +300,7 @@ class MessageProcessor {
             messageId: batchedMessage.id,
             error: error.message
           });
-          
+
           // Fallback to legacy processing
           await this.processMessageLegacy(message);
         }
@@ -229,7 +312,7 @@ class MessageProcessor {
         messageId: message.id,
         error: error.message
       });
-      
+
       // Fallback to legacy processing
       await this.processMessageLegacy(message);
     }
