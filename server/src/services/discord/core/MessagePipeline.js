@@ -8,7 +8,7 @@ const logger = require('../../logger/Logger');
  * Handles message flow without mutating Discord.js objects
  */
 class MessagePipeline {
-  
+
   constructor(dependencies = {}) {
     this.dependencies = {
       discordClient: null,
@@ -17,12 +17,12 @@ class MessagePipeline {
       conversationManager: null,
       ...dependencies
     };
-    
+
     this.decisionPipeline = new DecisionPipeline(
       this.dependencies.llmService,
       this.dependencies
     );
-    
+
     this.stats = {
       messagesProcessed: 0,
       actionsExecuted: 0,
@@ -36,11 +36,11 @@ class MessagePipeline {
    */
   async processMessage(discordMessage) {
     const startTime = Date.now();
-    
+
     try {
       // Step 1: Create immutable message context
       const messageContext = this.createMessageContext(discordMessage);
-      
+
       // Step 2: Apply message filters
       const shouldProcess = await this.shouldProcessMessage(messageContext);
       if (!shouldProcess) {
@@ -54,16 +54,16 @@ class MessagePipeline {
 
       // Step 3: Build channel context
       const channelContext = await this.buildChannelContext(messageContext);
-      
+
       // Step 4: Make decision
       const decision = await this.decisionPipeline.processMessage(messageContext, channelContext);
-      
+
       // Step 5: Execute action
       const actionResult = await this.executeAction(decision, messageContext, channelContext);
-      
+
       const processingTime = Date.now() - startTime;
       this.updateStats(processingTime, true);
-      
+
       logger.info('Message processed successfully', {
         source: 'message_pipeline',
         messageId: messageContext.id,
@@ -81,7 +81,7 @@ class MessagePipeline {
     } catch (error) {
       const processingTime = Date.now() - startTime;
       this.updateStats(processingTime, false);
-      
+
       logger.error('Message processing failed', {
         source: 'message_pipeline',
         messageId: discordMessage.id,
@@ -113,7 +113,7 @@ class MessagePipeline {
       content: discordMessage.content || '',
       timestamp: discordMessage.createdTimestamp,
       editedTimestamp: discordMessage.editedTimestamp,
-      
+
       // Author information (immutable copy)
       author: {
         id: discordMessage.author.id,
@@ -122,27 +122,27 @@ class MessagePipeline {
         bot: discordMessage.author.bot,
         avatar: discordMessage.author.avatar
       },
-      
+
       // Channel information
       channel: {
         id: discordMessage.channel.id,
         name: discordMessage.channel.name,
         type: discordMessage.channel.type
       },
-      
+
       // Guild information (if available)
       guild: discordMessage.guild ? {
         id: discordMessage.guild.id,
         name: discordMessage.guild.name
       } : null,
-      
+
       // Message metadata
       reference: discordMessage.reference ? {
         messageId: discordMessage.reference.messageId,
         channelId: discordMessage.reference.channelId,
         guildId: discordMessage.reference.guildId
       } : null,
-      
+
       // Mentions (immutable)
       mentions: {
         users: Array.from(discordMessage.mentions.users.keys()),
@@ -150,7 +150,7 @@ class MessagePipeline {
         everyone: discordMessage.mentions.everyone,
         here: discordMessage.mentions.here
       },
-      
+
       // Attachments
       attachments: discordMessage.attachments.map(attachment => ({
         id: attachment.id,
@@ -159,12 +159,12 @@ class MessagePipeline {
         url: attachment.url,
         contentType: attachment.contentType
       })),
-      
+
       // Message features
       pinned: discordMessage.pinned,
       tts: discordMessage.tts,
       embeds: discordMessage.embeds.length > 0,
-      
+
       // Reference to original Discord message (read-only)
       _originalMessage: discordMessage
     };
@@ -176,7 +176,7 @@ class MessagePipeline {
 
     // Add image analysis if available
     if (discordMessage.imageAnalysis) {
-      messageContext.imageAnalysis = Array.isArray(discordMessage.imageAnalysis) 
+      messageContext.imageAnalysis = Array.isArray(discordMessage.imageAnalysis)
         ? [...discordMessage.imageAnalysis]
         : [discordMessage.imageAnalysis];
     }
@@ -192,27 +192,27 @@ class MessagePipeline {
     if (this.dependencies.messageFilter) {
       // Check if channelManager is available and has the required method
       const channelManager = this.dependencies.channelManager;
-      
+
       if (channelManager && typeof channelManager.isChannelActive === 'function') {
         // Use the correct method name and pass channelManager
         const result = this.dependencies.messageFilter.shouldProcessMessage(
-          messageContext._originalMessage, 
+          messageContext._originalMessage,
           channelManager
         );
         return result.shouldProcess;
       } else {
         // Fallback: skip channel active check if channelManager not available
         // Just check if it's not a bot message
-        return !messageContext.author.bot && 
-               messageContext.content.length > 0 &&
-               !messageContext.content.startsWith('!');
+        return !messageContext.author.bot &&
+          messageContext.content.length > 0 &&
+          !messageContext.content.startsWith('!');
       }
     }
 
     // Basic filtering logic
-    return !messageContext.author.bot && 
-           messageContext.content.length > 0 &&
-           !messageContext.content.startsWith('!');
+    return !messageContext.author.bot &&
+      messageContext.content.length > 0 &&
+      !messageContext.content.startsWith('!');
   }
 
   /**
@@ -223,7 +223,7 @@ class MessagePipeline {
       channelId: messageContext.channel.id,
       channelName: messageContext.channel.name,
       serverName: messageContext.guild?.name || 'Direct Message',
-      
+
       // Default values
       activityLevel: 'normal',
       lastAction: 'none',
@@ -237,11 +237,11 @@ class MessagePipeline {
       if (this.dependencies.conversationManager) {
         // Use the correct synchronous method (not async)
         const history = this.dependencies.conversationManager.getHistory(
-          messageContext.channel.id, 
+          messageContext.channel.id,
           10
         );
         channelContext.conversationHistory = history || [];
-        
+
         logger.debug('Built channel context with conversation history', {
           source: 'message_pipeline',
           channelId: messageContext.channel.id,
@@ -279,7 +279,7 @@ class MessagePipeline {
     return channelContext;
   }
 
-  /**
+/**
    * Execute the decided action using plugin system
    */
   async executeAction(decision, messageContext, channelContext) {
@@ -309,8 +309,20 @@ class MessagePipeline {
 
         result = await PluginRegistry.executeAction(actionPlugin.name, context, this.dependencies);
       } else {
-        // Fallback to legacy action execution
-        result = await this.executeLegacyAction(decision, messageContext, channelContext);
+        // NO LEGACY FALLBACK - action must be handled by plugin
+        logger.error('No plugin found for action - action not executed', {
+          source: 'message_pipeline',
+          action: decision.action,
+          messageId: messageContext.id,
+          availableActions: actionPlugins.map(p => p.name)
+        });
+
+        result = {
+          success: false,
+          error: `No plugin available for action: ${decision.action}`,
+          action: decision.action,
+          availableActions: actionPlugins.map(p => p.name)
+        };
       }
 
       this.stats.actionsExecuted++;
@@ -341,27 +353,6 @@ class MessagePipeline {
     }
   }
 
-  /**
-   * Fallback action execution for non-plugin actions
-   */
-  async executeLegacyAction(decision, messageContext, channelContext) {
-    // This would call the existing ActionExecutor or ActionRouter
-    // Keeping backwards compatibility during transition
-    
-    logger.warn('Using legacy action execution', {
-      source: 'message_pipeline',
-      action: decision.action,
-      messageId: messageContext.id
-    });
-
-    return {
-      success: true,
-      action: decision.action,
-      legacy: true,
-      message: 'Action executed via legacy system'
-    };
-  }
-
   // === HELPER METHODS ===
 
   getLastBotAction(conversationHistory) {
@@ -385,11 +376,11 @@ class MessagePipeline {
 
   updateStats(processingTime, success) {
     this.stats.messagesProcessed++;
-    
+
     if (!success) {
       this.stats.errorsEncountered++;
     }
-    
+
     // Update rolling average
     if (this.stats.averageProcessingTime === 0) {
       this.stats.averageProcessingTime = processingTime;

@@ -5,11 +5,9 @@ const CommandHandler = require('../commands/CommandHandler');
 const ResponseGenerator = require('../response/ResponseGenerator');
 const MessageFilter = require('../MessageFilter');
 const MessageBatcher = require('../MessageBatcher');
-const MultiLLMDecisionEngine = require('../../llm/MultiLLMDecisionEngine');
-const ActionExecutor = require('../ActionExecutor');
 const imageProcessingService = require('../../image_processing/ImageProcessingService');
 
-// NEW: Import plugin system
+// ONLY plugin system - no legacy imports
 const PluginSystem = require('../core/PluginSystem');
 const LLMServiceSingleton = require('../../llm/LLMServiceSingleton');
 
@@ -18,64 +16,31 @@ class MessageProcessor {
     this.discordClient = discordClient;
     this.channelManager = channelManager;
 
-    // NEW: Plugin system configuration
-    this.usePluginSystem = options.usePluginSystem !== false; // Default to true
+    // Plugin system is always enabled (no toggle)
     this.pluginSystemInitialized = false;
 
-    // Initialize specialized services
+    // Initialize shared services
     this.conversationManager = new ConversationManager();
     this.commandHandler = new CommandHandler(discordClient, this.conversationManager);
     this.responseGenerator = new ResponseGenerator(this.conversationManager);
     this.messageFilter = new MessageFilter();
-    this.messageBatcher = new MessageBatcher(3000); // 3 second timeout
+    this.messageBatcher = new MessageBatcher(3000);
     this.imageProcessor = imageProcessingService;
 
-    // Autonomous decision making with tool support (legacy)
-    this.decisionEngine = new MultiLLMDecisionEngine();
-    this.actionExecutor = new ActionExecutor(discordClient, this.conversationManager);
-
-    // Initialize systems
-    this.initializeToolSystem(); // Legacy
-    this.initializePluginSystem(); // NEW
+    // Initialize plugin system only
+    this.initializePluginSystem();
   }
 
-  // Legacy tool system initialization (kept for backwards compatibility)
-  initializeToolSystem() {
-    try {
-      // Initialize tool executor in decision engine
-      this.decisionEngine.initializeToolExecutor(this.discordClient, this.conversationManager);
-
-      logger.success('Legacy tool system initialized in MessageProcessor', {
-        source: 'discord',
-        availableTools: this.decisionEngine.getAvailableTools()
-      });
-    } catch (error) {
-      logger.error('Failed to initialize legacy tool system', {
-        source: 'discord',
-        error: error.message
-      });
-    }
-  }
-
-  // NEW: Plugin system initialization
+  // Plugin system initialization (no legacy alternative)
   async initializePluginSystem() {
-    if (!this.usePluginSystem) {
-      logger.info('Plugin system disabled, using legacy system only', {
-        source: 'discord'
-      });
-      return;
-    }
-
     try {
-      // Initialize plugin system with Atlas dependencies
       const result = await PluginSystem.initialize({
         discordClient: this.discordClient,
-        llmService: LLMServiceSingleton.getInstance(), // Use actual LLM service
+        llmService: LLMServiceSingleton.getInstance(),
         conversationManager: this.conversationManager,
         responseGenerator: this.responseGenerator,
         messageFilter: this.messageFilter,
-        actionExecutor: this.actionExecutor,
-        channelManager: this.channelManager // Add channelManager
+        channelManager: this.channelManager
       });
 
       if (result.success) {
@@ -86,24 +51,24 @@ class MessageProcessor {
           pluginsFailed: result.pluginsFailed
         });
       } else {
-        logger.error('Plugin system initialization failed, falling back to legacy', {
+        logger.error('Plugin system initialization failed', {
           source: 'discord',
           error: result.error
         });
-        this.usePluginSystem = false;
+        throw new Error(`Plugin system failed to initialize: ${result.error}`);
       }
     } catch (error) {
-      logger.error('Failed to initialize plugin system, falling back to legacy', {
+      logger.error('Failed to initialize plugin system', {
         source: 'discord',
         error: error.message
       });
-      this.usePluginSystem = false;
+      throw error;
     }
   }
 
   async processMessage(message) {
     try {
-      // DEFENSIVE: Validate message object
+      // Validate message object
       if (!message) {
         logger.warn('Received null/undefined message', { source: 'discord' });
         return;
@@ -121,12 +86,16 @@ class MessageProcessor {
         return;
       }
 
-      // FEATURE TOGGLE: Use plugin system if available, otherwise legacy
-      if (this.usePluginSystem && this.pluginSystemInitialized) {
-        await this.processMessageWithPlugins(message);
-      } else {
-        await this.processMessageLegacy(message);
+      // Always use plugin system (no toggle)
+      if (!this.pluginSystemInitialized) {
+        logger.error('Plugin system not initialized, cannot process message', {
+          source: 'discord',
+          messageId: message.id
+        });
+        return;
       }
+
+      await this.processMessageWithPlugins(message);
 
     } catch (error) {
       logger.error('Error in processMessage', {
@@ -134,8 +103,7 @@ class MessageProcessor {
         error: error.message,
         stack: error.stack,
         messageId: message?.id || 'unknown',
-        author: message?.author?.username || 'Unknown',
-        usingPluginSystem: this.usePluginSystem && this.pluginSystemInitialized
+        author: message?.author?.username || 'Unknown'
       });
     }
   }
@@ -149,462 +117,81 @@ class MessageProcessor {
         hasAttachments: message.attachments?.size > 0
       });
 
-      // STEP 1: Image processing FIRST (like legacy system)
-      let imageAnalysis = null;
-
-      logger.debug('Image processing check', {
-        source: 'discord',
-        messageId: message.id,
-        hasAttachments: !!(message.attachments?.size > 0),
-        attachmentSize: message.attachments?.size || 0,
-        attachmentDetails: message.attachments ? Array.from(message.attachments.values()).map(att => ({
-          name: att.name,
-          contentType: att.contentType,
-          size: att.size,
-          url: att.url
-        })) : []
-      });
-
-      // FIX: Check for ANY images (attachments, embeds, or URLs in content), not just attachments
-      const hasAttachments = message.attachments?.size > 0;
-      const hasImageContent = this.messageHasImageContent(message);
-
-      if (hasAttachments || hasImageContent) {
-        logger.info('ENTERING image processing block (plugin system)', {
-          source: 'image_processing',
-          messageId: message.id,
-          hasAttachments: hasAttachments,
-          hasImageContent: hasImageContent,
-          attachmentCount: message.attachments?.size || 0
-        });
-
-        try {
-          const llmSettings = storage.getLLMSettings();
-
-          logger.debug('LLM Settings check', {
-            source: 'image_processing',
-            enableImageAnalysis: llmSettings.enable_image_analysis,
-            imageProvider: llmSettings.image_provider,
-            hasImageApiKey: !!llmSettings.image_api_key,
-            imageModel: llmSettings.image_model
-          });
-
-          if (llmSettings.enable_image_analysis) {
-            logger.info('CALLING imageProcessor.processMessageImages (plugin system)', {
-              source: 'image_processing',
-              messageId: message.id,
-              attachmentCount: message.attachments?.size || 0,
-              hasImageContent: hasImageContent
-            });
-
-            // Use correct method name and add settings parameter
-            const imageSettings = {
-              provider: llmSettings.image_provider,
-              api_key: llmSettings.image_api_key,
-              model: llmSettings.image_model,
-              maxSize: llmSettings.image_max_size || 5,
-              quality: llmSettings.image_quality || 2,
-              gifFrameCount: llmSettings.gif_frame_count || 2
-            };
-
-            imageAnalysis = await this.imageProcessor.processMessageImages(message, imageSettings);
-
-            logger.info('IMAGE PROCESSING RESULT (plugin system)', {
-              source: 'image_processing',
-              messageId: message.id,
-              analysisResult: imageAnalysis,
-              analysisLength: imageAnalysis?.length || 0,
-              analysisType: typeof imageAnalysis
-            });
-
-            // CRITICAL: Attach image analysis to message BEFORE adding to history
-            if (imageAnalysis && imageAnalysis.length > 0) {
-              message.imageAnalysis = imageAnalysis;
-
-              logger.success('Image analysis attached to message (plugin system)', {
-                source: 'image_processing',
-                messageId: message.id,
-                analysisCount: imageAnalysis.length,
-                hasAnalysis: true
-              });
-            } else {
-              logger.warn('No image analysis generated (plugin system)', {
-                source: 'image_processing',
-                messageId: message.id,
-                analysisResult: imageAnalysis
-              });
-            }
-          } else {
-            logger.warn('Image analysis DISABLED in settings (plugin system)', {
-              source: 'image_processing',
-              messageId: message.id,
-              enableImageAnalysis: llmSettings.enable_image_analysis
-            });
-          }
-        } catch (error) {
-          logger.error('Image processing FAILED with error (plugin system)', {
-            source: 'image_processing',
-            error: error.message,
-            stack: error.stack,
-            messageId: message.id,
-            attachmentCount: message.attachments?.size || 0
-          });
-          // Continue processing without image analysis
-        }
-      } else {
-        logger.debug('NO IMAGES detected (plugin system)', {
-          source: 'discord',
-          messageId: message.id,
-          hasAttachments: hasAttachments,
-          hasImageContent: hasImageContent,
-          attachmentSize: message.attachments?.size || 0
-        });
-      }
-
-      // STEP 2: Add user message to conversation history WITH image analysis
-      const addedMessage = this.conversationManager.addMessage(message, false);
-
-      logger.debug('Added user message with image analysis to history', {
-        source: 'discord',
-        messageId: message.id,
-        hasImageAnalysis: !!(message.imageAnalysis && message.imageAnalysis.length > 0),
-        analysisCount: message.imageAnalysis?.length || 0
-      });
-
-      // STEP 3: Message batching with CORRECT method signature  
-      await this.messageBatcher.addToBatch(message, async (batchedMessage) => {
-        try {
-          logger.debug('Processing batched message through plugin system', {
-            source: 'discord',
-            messageId: batchedMessage.id,
-            isBatched: batchedMessage.isBatched || false,
-            hasImageAnalysis: !!(batchedMessage.imageAnalysis && batchedMessage.imageAnalysis.length > 0)
-          });
-
-          // Process through plugin-enabled pipeline
-          const result = await PluginSystem.processMessage(batchedMessage);
-
-          if (result.processed) {
-            logger.info('Message processed successfully with plugins', {
-              source: 'discord',
-              messageId: batchedMessage.id,
-              action: result.decision?.action,
-              processingTime: result.processingTime
-            });
-          } else {
-            logger.warn('Message processing failed with plugins, trying legacy fallback', {
-              source: 'discord',
-              messageId: batchedMessage.id,
-              reason: result.reason || result.error
-            });
-
-            // Fallback to legacy if plugin processing fails
-            await this.processMessageLegacy(message);
-          }
-
-        } catch (error) {
-          logger.error('Plugin batched message processing failed, falling back to legacy', {
-            source: 'discord',
-            messageId: batchedMessage.id,
-            error: error.message
-          });
-
-          // Fallback to legacy processing
-          await this.processMessageLegacy(message);
-        }
-      });
-
-    } catch (error) {
-      logger.error('Plugin message processing failed, falling back to legacy', {
-        source: 'discord',
-        messageId: message.id,
-        error: error.message
-      });
-
-      // Fallback to legacy processing
-      await this.processMessageLegacy(message);
-    }
-  }
-
-  /**
-   * Check if message has image content (URLs, embeds, etc.) beyond just attachments
-   * @param {Object} message - Discord message object
-   * @returns {boolean} - True if message contains image content
-   */
-  messageHasImageContent(message) {
-    // Check for embeds with images
-    if (message.embeds && message.embeds.length > 0) {
-      for (const embed of message.embeds) {
-        if (embed.image?.url || embed.thumbnail?.url) {
-          return true;
-        }
-      }
-    }
-
-    // Check for image URLs in message content
-    if (message.content) {
-      const urlPattern = /https?:\/\/[^\s]+/g;
-      const urls = message.content.match(urlPattern) || [];
-
-      for (const url of urls) {
-        if (this.isImageUrl(url)) {
-          return true;
-        }
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Check if URL points to an image (same logic as ImageExtractor)
-   * @param {string} url - URL to check
-   * @returns {boolean} - True if URL is an image
-   */
-  isImageUrl(url) {
-    try {
-      const urlObj = new URL(url);
-      const pathname = urlObj.pathname.toLowerCase();
-
-      // Check file extension
-      const imageExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.svg'];
-      const hasImageExtension = imageExtensions.some(ext => pathname.endsWith(ext));
-
-      /**
-      // Check Discord CDN patterns
-      const isDiscordCdn = urlObj.hostname.includes('discord') &&
-        (urlObj.hostname.includes('cdn.discord') ||
-          urlObj.hostname.includes('media.discord'));
-
-      // Check other common image hosting domains
-      const imageHostingDomains = [
-        'imgur.com', 'i.imgur.com',
-        'gyazo.com', 'i.gyazo.com',
-        'prnt.sc', 'prntscr.com',
-        'postimg.cc', 'i.postimg.cc',
-        'tenor.com', 'media.tenor.com',
-        'giphy.com', 'media.giphy.com'
-      ];
-      const isImageHost = imageHostingDomains.some(domain => urlObj.hostname.includes(domain));
- */
-      return hasImageExtension;
-      //return hasImageExtension || isDiscordCdn || isImageHost;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  // Legacy message processing (unchanged, but extracted into separate method)
-  async processMessageLegacy(message) {
-    try {
-      logger.debug('Processing message with legacy system', {
-        source: 'discord',
-        messageId: message.id,
-        author: message.author?.username
-      });
-
-      // Image processing (unchanged)
+      // Image processing (if enabled)
       let imageAnalysis = null;
       if (message.attachments?.size > 0) {
         try {
-          const llmSettings = storage.getLLMSettings();
-          if (llmSettings.enable_image_analysis) {
-            imageAnalysis = await this.imageProcessor.analyzeMessageImages(message);
-            logger.info('Images processed', {
-              source: 'image_processing',
-              imageCount: imageAnalysis.length,
-              hasVisionConfig: !!llmSettings.image_provider,
-              hasApiKey: !!llmSettings.image_api_key,
-              hasModel: !!llmSettings.image_model
-            });
-          }
+          imageAnalysis = await this.imageProcessor.processMessageImages(message);
+          logger.debug('Image analysis completed', {
+            source: 'discord',
+            messageId: message.id,
+            analysisCount: imageAnalysis?.length || 0
+          });
         } catch (error) {
           logger.error('Image processing failed', {
-            source: 'image_processing',
-            error: error.message,
-            hasVisionConfig: !!llmSettings.image_provider,
-            hasApiKey: !!llmSettings.image_api_key,
-            hasModel: !!llmSettings.image_model
+            source: 'discord',
+            messageId: message.id,
+            error: error.message
           });
         }
       }
 
-      // Add image analysis to message if available
-      if (imageAnalysis) {
-        message.imageAnalysis = imageAnalysis;
-      }
+      // Process through plugin system
+      const result = await PluginSystem.processMessage(message);
 
-      const addResult = this.conversationManager.addMessage(message);
-      if (!addResult) {
-        logger.warn('Failed to add message to conversation history', {
+      if (result.processed) {
+        logger.info('Message processed successfully via plugin system', {
           source: 'discord',
-          messageId: message.id
+          messageId: message.id,
+          action: result.decision?.action,
+          processingTime: result.processingTime
         });
-        return;
-      }
-
-      // Handle batching for rapid successive messages
-      await this.messageBatcher.addToBatch(message, async (batchedMessage) => {
-        await this.handleProcessedMessageLegacy(batchedMessage, imageAnalysis);
-      });
-
-    } catch (error) {
-      logger.error('Error in legacy processMessage', {
-        source: 'discord',
-        error: error.message,
-        stack: error.stack,
-        messageId: message?.id || 'unknown',
-        author: message?.author?.username || 'Unknown'
-      });
-    }
-  }
-
-  // Legacy message handling (unchanged)
-  async handleProcessedMessageLegacy(message, imageAnalysis) {
-    try {
-      // DEFENSIVE: Ensure message exists
-      if (!message) {
-        logger.warn('handleProcessedMessageLegacy called with null message', { source: 'discord' });
-        return;
-      }
-
-      // Attach image analysis to message for decision making
-      if (imageAnalysis) {
-        message.imageAnalysis = imageAnalysis;
-      }
-
-      // Get conversation history
-      const conversationHistory = this.conversationManager.getHistory(message.channel?.id || 'unknown', 10);
-
-      // Build context for decision making
-      const context = {
-        message: message,
-        channel: message.channel,
-        author: message.author,
-        conversationHistory: conversationHistory,
-        conversationManager: this.conversationManager,
-        messageFilter: this.messageFilter,
-        discordClient: this.discordClient,
-        hasImages: !!(imageAnalysis && imageAnalysis.length > 0),
-        hasEmbeds: !!(message.embeds && message.embeds.length > 0),
-        embedCount: message.embeds ? message.embeds.length : 0,
-        isTriggered: false
-      };
-
-      // Make decision using legacy decision engine
-      const decision = await this.decisionEngine.makeDecision(context);
-
-      // DEFENSIVE: Ensure decision exists
-      if (!decision) {
-        logger.warn('Legacy decision engine returned null decision', {
-          source: 'discord',
-          messageId: message.id
-        });
-        return;
-      }
-
-      logger.info('Legacy decision made', {
-        source: 'discord',
-        action: decision.action,
-        confidence: decision.confidence,
-        reasoning: decision.reasoning,
-        channel: message.channel?.name || 'Unknown',
-        hasChainMetadata: !!decision.chainMetadata,
-        toolsUsed: decision.chainMetadata ? decision.chainMetadata.toolActionCount : 0
-      });
-
-      // Execute the final decision (only non-tool actions reach ActionExecutor)
-      if (!this.isToolAction(decision.action)) {
-        await this.actionExecutor.executeAction(decision, message);
       } else {
-        logger.warn('Tool action reached ActionExecutor in legacy mode', {
+        logger.debug('Message not processed by plugin system', {
           source: 'discord',
-          action: decision.action,
-          messageId: message.id
+          messageId: message.id,
+          reason: result.reason
         });
       }
 
     } catch (error) {
-      logger.error('Error processing legacy message', {
+      logger.error('Error processing message with plugins', {
         source: 'discord',
         error: error.message,
         stack: error.stack,
-        messageId: message?.id || 'unknown',
-        channel: message?.channel?.name || 'Unknown'
+        messageId: message?.id || 'unknown'
       });
     }
   }
 
-  isToolAction(action) {
-    const toolActions = ['profile_lookup'];
-    return toolActions.includes(action);
-  }
-
-  // NEW: Toggle plugin system at runtime
-  async enablePluginSystem() {
-    if (this.usePluginSystem && this.pluginSystemInitialized) {
-      logger.info('Plugin system already enabled', { source: 'discord' });
-      return { success: true, message: 'Already enabled' };
-    }
-
-    this.usePluginSystem = true;
-    await this.initializePluginSystem();
-
-    return {
-      success: this.pluginSystemInitialized,
-      message: this.pluginSystemInitialized ? 'Plugin system enabled' : 'Failed to enable plugin system'
-    };
-  }
-
-  disablePluginSystem() {
-    this.usePluginSystem = false;
-    logger.info('Plugin system disabled, using legacy system', { source: 'discord' });
-    return { success: true, message: 'Plugin system disabled' };
-  }
-
-  // Enhanced stats including plugin system
+  // Simple stats (plugin system only)
   getStats() {
-    const baseStats = {
+    return {
       messageProcessor: {
-        usingPluginSystem: this.usePluginSystem && this.pluginSystemInitialized,
         pluginSystemInitialized: this.pluginSystemInitialized,
-        legacyModeActive: !this.usePluginSystem || !this.pluginSystemInitialized
+        pluginSystemOnly: true
       },
-      decisionEngine: this.decisionEngine.getDecisionStats(),
-      toolSystem: this.decisionEngine.getToolStats()
+      pluginSystem: this.pluginSystemInitialized ? PluginSystem.getStatus() : null
     };
-
-    // Add plugin system stats if available
-    if (this.usePluginSystem && this.pluginSystemInitialized) {
-      baseStats.pluginSystem = PluginSystem.getStatus();
-    }
-
-    return baseStats;
   }
 
-  // Enhanced tool management
+  // Tool management (plugin system only)
   getAvailableTools() {
-    const tools = {
-      legacy: this.decisionEngine.getAvailableTools()
-    };
-
-    if (this.usePluginSystem && this.pluginSystemInitialized) {
-      tools.plugins = PluginSystem.getStatus().configuredPlugins;
+    if (!this.pluginSystemInitialized) {
+      return { plugins: [] };
     }
-
-    return tools;
+    return {
+      plugins: PluginSystem.getStatus().configuredPlugins
+    };
   }
 
   getToolStats() {
-    const stats = {
-      legacy: this.decisionEngine.getToolStats()
-    };
-
-    if (this.usePluginSystem && this.pluginSystemInitialized) {
-      stats.plugins = PluginSystem.getStatus().pluginRegistry;
+    if (!this.pluginSystemInitialized) {
+      return { plugins: {} };
     }
-
-    return stats;
+    return {
+      plugins: PluginSystem.getStatus().pluginRegistry
+    };
   }
 
   // Existing public API methods (unchanged)
@@ -628,10 +215,6 @@ class MessageProcessor {
     return this.responseGenerator;
   }
 
-  getDecisionEngine() {
-    return this.decisionEngine;
-  }
-
   getImageProcessor() {
     return this.imageProcessor;
   }
@@ -640,9 +223,9 @@ class MessageProcessor {
     return this.messageBatcher;
   }
 
-  // NEW: Get plugin system (if available)
+  // Plugin system access
   getPluginSystem() {
-    return this.usePluginSystem && this.pluginSystemInitialized ? PluginSystem : null;
+    return this.pluginSystemInitialized ? PluginSystem : null;
   }
 }
 
