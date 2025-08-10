@@ -112,7 +112,7 @@ class PromptBuilder {
 
     // Assemble final prompt
     const variables = {
-      systemPrompt: systemSection + '\n\n',
+      systemPrompt: systemSection + '\n',
       characterIdentity: characterSection,
       exampleMessages: exampleSection,
       conversationHistory: historySection,
@@ -164,7 +164,7 @@ class PromptBuilder {
     }
 
     let messages = '';
-    let currentTokens = TemplateEngine.estimateTokenCount('## Conversation History:\n');
+    let currentTokens = TemplateEngine.estimateTokenCount('## Conversation History:');
     let includedMessages = 0;
 
     for (const message of conversationHistory) {
@@ -233,7 +233,7 @@ class PromptBuilder {
       }
     });
 
-    return cleanedExamples.join('\n') + '\n';
+    return cleanedExamples.join('\n');
   }
 
   countMessagesInHistory(historySection) {

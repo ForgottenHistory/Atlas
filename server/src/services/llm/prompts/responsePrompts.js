@@ -31,14 +31,10 @@ const CHARACTER_PROMPT_TEMPLATE = `{systemPrompt}
 {replyToSection}{characterName}: `;
 
 const CHARACTER_IDENTITY_TEMPLATE = `Character: {characterName}
-Description: {characterDescription}
-
-`;
+Description: {characterDescription}`;
 
 const EXAMPLE_MESSAGES_TEMPLATE = `Example messages:
-{examples}
-
-`;
+{examples}`;
 
 const CONVERSATION_HISTORY_TEMPLATE = `## Conversation History:
 {messages}`;

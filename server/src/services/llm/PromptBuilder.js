@@ -164,7 +164,7 @@ class PromptBuilder {
     }
 
     let messages = '';
-    let currentTokens = TemplateEngine.estimateTokenCount('## Conversation History:\n');
+    let currentTokens = TemplateEngine.estimateTokenCount('## Conversation History:');
     let includedMessages = 0;
 
     for (const message of conversationHistory) {
