@@ -367,9 +367,10 @@ class MessageProcessor {
       const pathname = urlObj.pathname.toLowerCase();
 
       // Check file extension
-      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.svg'];
       const hasImageExtension = imageExtensions.some(ext => pathname.endsWith(ext));
 
+      /**
       // Check Discord CDN patterns
       const isDiscordCdn = urlObj.hostname.includes('discord') &&
         (urlObj.hostname.includes('cdn.discord') ||
@@ -385,8 +386,9 @@ class MessageProcessor {
         'giphy.com', 'media.giphy.com'
       ];
       const isImageHost = imageHostingDomains.some(domain => urlObj.hostname.includes(domain));
-
-      return hasImageExtension || isDiscordCdn || isImageHost;
+ */
+      return hasImageExtension;
+      //return hasImageExtension || isDiscordCdn || isImageHost;
     } catch (error) {
       return false;
     }
