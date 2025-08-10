@@ -1,5 +1,4 @@
 const PingCommand = require('./handlers/PingCommand');
-const TriggerCommand = require('./handlers/TriggerCommand');
 const logger = require('../../logger/Logger');
 
 class CommandProcessor {
@@ -15,7 +14,6 @@ class CommandProcessor {
   initializeCommands() {
     // Register all command handlers
     this.registerCommand(new PingCommand(this.discordClient, this.conversationManager));
-    this.registerCommand(new TriggerCommand(this.discordClient, this.conversationManager));
     
     logger.info('Command handlers initialized', {
       source: 'discord',
