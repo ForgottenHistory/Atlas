@@ -149,13 +149,13 @@ class MessageProcessor {
         hasAttachments: message.attachments?.size > 0
       });
 
-      // STEP 1: Image processing FIRST with FIXED method call
+      // STEP 1: Image processing FIRST (like legacy system)
       let imageAnalysis = null;
 
       logger.debug('Image processing check', {
         source: 'discord',
         messageId: message.id,
-        hasAttachments: !!message.attachments,
+        hasAttachments: !!(message.attachments?.size > 0),
         attachmentSize: message.attachments?.size || 0,
         attachmentDetails: message.attachments ? Array.from(message.attachments.values()).map(att => ({
           name: att.name,
@@ -165,11 +165,17 @@ class MessageProcessor {
         })) : []
       });
 
-      if (message.attachments?.size > 0) {
-        logger.info('ENTERING image processing block', {
+      // FIX: Check for ANY images (attachments, embeds, or URLs in content), not just attachments
+      const hasAttachments = message.attachments?.size > 0;
+      const hasImageContent = this.messageHasImageContent(message);
+
+      if (hasAttachments || hasImageContent) {
+        logger.info('ENTERING image processing block (plugin system)', {
           source: 'image_processing',
           messageId: message.id,
-          attachmentCount: message.attachments.size
+          hasAttachments: hasAttachments,
+          hasImageContent: hasImageContent,
+          attachmentCount: message.attachments?.size || 0
         });
 
         try {
@@ -184,13 +190,14 @@ class MessageProcessor {
           });
 
           if (llmSettings.enable_image_analysis) {
-            logger.info('CALLING imageProcessor.processMessageImages', {
+            logger.info('CALLING imageProcessor.processMessageImages (plugin system)', {
               source: 'image_processing',
               messageId: message.id,
-              attachmentCount: message.attachments.size
+              attachmentCount: message.attachments?.size || 0,
+              hasImageContent: hasImageContent
             });
 
-            // FIXED: Use correct method name and add settings parameter
+            // Use correct method name and add settings parameter
             const imageSettings = {
               provider: llmSettings.image_provider,
               api_key: llmSettings.image_api_key,
@@ -202,7 +209,7 @@ class MessageProcessor {
 
             imageAnalysis = await this.imageProcessor.processMessageImages(message, imageSettings);
 
-            logger.info('IMAGE PROCESSING RESULT', {
+            logger.info('IMAGE PROCESSING RESULT (plugin system)', {
               source: 'image_processing',
               messageId: message.id,
               analysisResult: imageAnalysis,
@@ -214,28 +221,28 @@ class MessageProcessor {
             if (imageAnalysis && imageAnalysis.length > 0) {
               message.imageAnalysis = imageAnalysis;
 
-              logger.success('Image analysis attached to message', {
+              logger.success('Image analysis attached to message (plugin system)', {
                 source: 'image_processing',
                 messageId: message.id,
                 analysisCount: imageAnalysis.length,
                 hasAnalysis: true
               });
             } else {
-              logger.warn('No image analysis generated', {
+              logger.warn('No image analysis generated (plugin system)', {
                 source: 'image_processing',
                 messageId: message.id,
                 analysisResult: imageAnalysis
               });
             }
           } else {
-            logger.warn('Image analysis DISABLED in settings', {
+            logger.warn('Image analysis DISABLED in settings (plugin system)', {
               source: 'image_processing',
               messageId: message.id,
               enableImageAnalysis: llmSettings.enable_image_analysis
             });
           }
         } catch (error) {
-          logger.error('Image processing FAILED with error', {
+          logger.error('Image processing FAILED with error (plugin system)', {
             source: 'image_processing',
             error: error.message,
             stack: error.stack,
@@ -245,10 +252,11 @@ class MessageProcessor {
           // Continue processing without image analysis
         }
       } else {
-        logger.debug('NO ATTACHMENTS detected', {
+        logger.debug('NO IMAGES detected (plugin system)', {
           source: 'discord',
           messageId: message.id,
-          hasAttachments: !!message.attachments,
+          hasAttachments: hasAttachments,
+          hasImageContent: hasImageContent,
           attachmentSize: message.attachments?.size || 0
         });
       }
@@ -315,6 +323,72 @@ class MessageProcessor {
 
       // Fallback to legacy processing
       await this.processMessageLegacy(message);
+    }
+  }
+
+  /**
+   * Check if message has image content (URLs, embeds, etc.) beyond just attachments
+   * @param {Object} message - Discord message object
+   * @returns {boolean} - True if message contains image content
+   */
+  messageHasImageContent(message) {
+    // Check for embeds with images
+    if (message.embeds && message.embeds.length > 0) {
+      for (const embed of message.embeds) {
+        if (embed.image?.url || embed.thumbnail?.url) {
+          return true;
+        }
+      }
+    }
+
+    // Check for image URLs in message content
+    if (message.content) {
+      const urlPattern = /https?:\/\/[^\s]+/g;
+      const urls = message.content.match(urlPattern) || [];
+
+      for (const url of urls) {
+        if (this.isImageUrl(url)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if URL points to an image (same logic as ImageExtractor)
+   * @param {string} url - URL to check
+   * @returns {boolean} - True if URL is an image
+   */
+  isImageUrl(url) {
+    try {
+      const urlObj = new URL(url);
+      const pathname = urlObj.pathname.toLowerCase();
+
+      // Check file extension
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
+      const hasImageExtension = imageExtensions.some(ext => pathname.endsWith(ext));
+
+      // Check Discord CDN patterns
+      const isDiscordCdn = urlObj.hostname.includes('discord') &&
+        (urlObj.hostname.includes('cdn.discord') ||
+          urlObj.hostname.includes('media.discord'));
+
+      // Check other common image hosting domains
+      const imageHostingDomains = [
+        'imgur.com', 'i.imgur.com',
+        'gyazo.com', 'i.gyazo.com',
+        'prnt.sc', 'prntscr.com',
+        'postimg.cc', 'i.postimg.cc',
+        'tenor.com', 'media.tenor.com',
+        'giphy.com', 'media.giphy.com'
+      ];
+      const isImageHost = imageHostingDomains.some(domain => urlObj.hostname.includes(domain));
+
+      return hasImageExtension || isDiscordCdn || isImageHost;
+    } catch (error) {
+      return false;
     }
   }
 
