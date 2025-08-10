@@ -58,13 +58,6 @@ class SocketHandlers {
 
       // Broadcast as a special log entry
       this.io.emit('newLog', promptLogEntry);
-      
-      logger.debug('Prompt data broadcasted as log entry', {
-        source: 'api',
-        promptLength: promptData.prompt?.length || 0,
-        character: promptData.character,
-        connectedClients: this.io.engine.clientsCount
-      });
     });
   }
 

@@ -170,6 +170,7 @@ class LLMRequestHandler {
     logger.info('Raw LLM response received', {
       source: 'llm',
       responseTime: `${responseTime}ms`,
+      rawResponse: rawResponse,
       rawLength: rawResponse.length,
       provider: this.llmClient.getCurrentProvider()
     });
