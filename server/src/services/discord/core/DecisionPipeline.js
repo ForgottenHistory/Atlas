@@ -1,6 +1,7 @@
 const PluginRegistry = require('./PluginRegistry');
 const EventBus = require('./EventBus');
-const DecisionBuilder = require('../../llm/builders/DecisionBuilder');
+// FIX: Use PromptBuilder instead of DecisionBuilder (same as DecisionMaker)
+const PromptBuilder = require('../../llm/decision/PromptBuilder');
 const logger = require('../../logger/Logger');
 
 /**
@@ -11,6 +12,10 @@ class DecisionPipeline {
   
   constructor(llmService, dependencies = {}) {
     this.llmService = llmService;
+    
+    // FIX: Initialize promptBuilder (same as DecisionMaker)
+    this.promptBuilder = new PromptBuilder();
+    
     this.dependencies = {
       discordClient: null,
       ...dependencies
@@ -64,156 +69,57 @@ class DecisionPipeline {
    * Core decision-making logic with plugin support
    */
   async makeDecision(message, channelContext, options = {}) {
+    const startTime = Date.now();
     const decisionContext = {
       message,
       channelContext,
       options,
       toolResults: [],
-      pluginResults: []
+      pluginResults: [],
+      startTime
     };
 
     // Phase 1: Determine if tools should be used
     const shouldUseTools = await this.shouldExecuteTools(message, channelContext);
     
     if (shouldUseTools) {
-      // Phase 2: Execute relevant tools/plugins
-      decisionContext.toolResults = await this.executeTools(message, channelContext);
-      decisionContext.pluginResults = decisionContext.toolResults; // Compatible format
+      // Execute tools for context enhancement
+      decisionContext.toolResults = await this.executeRelevantTools(message, channelContext);
+      this.stats.toolExecutions += decisionContext.toolResults.length;
+      
+      // Log tool execution results
+      for (const toolResult of decisionContext.toolResults) {
+        EventBus.toolExecuted(toolResult.tool, toolResult, { messageId: message.id });
+      }
     }
 
-    // Phase 3: Generate decision with context
-    const decision = await this.generateDecision(decisionContext);
+    // Phase 2: Generate decision with available context
+    const decision = await this.generateDecision(message, channelContext, decisionContext.toolResults);
     
-    // Phase 4: Validate and enhance decision
+    // Phase 3: Validate and enhance decision
     const validatedDecision = await this.validateDecision(decision, decisionContext);
     
+    this.stats.decisionsProcessed++;
+    this.stats.lastDecisionTime = new Date();
+    
+    // Log decision made
     EventBus.decisionMade(validatedDecision, {
       toolsUsed: shouldUseTools,
-      toolCount: decisionContext.toolResults.length
+      toolCount: decisionContext.toolResults.length,
+      messageId: message.id
     });
     
     return validatedDecision;
   }
 
   /**
-   * Determine if tools should be executed for this message
+   * FIX: Generate decision using proper DecisionMaker-compatible methods
    */
-  async shouldExecuteTools(message, channelContext) {
-    // Get all available tool plugins
-    const toolPlugins = PluginRegistry.getPluginsByType('tool');
-    
-    if (toolPlugins.length === 0) {
-      return false;
-    }
-
-    // Simple heuristics - can be made more sophisticated
-    const triggers = [
-      // User mentions
-      message.mentions?.users?.size > 0,
-      
-      // Direct replies
-      message.reference !== null,
-      
-      // Channel activity patterns
-      channelContext.activityLevel === 'high',
-      
-      // Time since last action
-      this.shouldAnalyzeBasedOnTiming(channelContext),
-      
-      // Keyword triggers
-      this.hasToolTriggerKeywords(message.content)
-    ];
-
-    const shouldUse = triggers.some(trigger => trigger);
-    
-    logger.debug('Tool execution decision', {
-      source: 'decision_pipeline',
-      shouldUse,
-      triggers: triggers.map((t, i) => ({ [`trigger_${i}`]: t })),
-      availableTools: toolPlugins.length
-    });
-
-    return shouldUse;
-  }
-
-  /**
-   * Execute relevant tools based on message context
-   */
-  async executeTools(message, channelContext) {
-    const toolPlugins = PluginRegistry.getPluginsByType('tool');
-    const results = [];
-    
-    // Execute tools concurrently
-    const toolPromises = toolPlugins.map(async (plugin) => {
-      try {
-        const context = {
-          message,
-          channelContext,
-          discordClient: this.dependencies.discordClient
-        };
-        
-        // Check if tool should execute for this context
-        const instance = await PluginRegistry.instantiatePlugin(plugin.name, this.dependencies);
-        if (typeof instance.shouldExecute === 'function') {
-          const shouldExecute = await instance.shouldExecute(context);
-          if (!shouldExecute) {
-            return null;
-          }
-        }
-        
-        // Execute tool
-        const result = await PluginRegistry.executeTool(plugin.name, context, this.dependencies);
-        
-        EventBus.toolExecuted(plugin.name, result, { messageId: message.id });
-        this.stats.toolExecutions++;
-        
-        return {
-          pluginName: plugin.name,
-          toolName: plugin.name,
-          success: result.success,
-          data: result.data,
-          summary: this.summarizeToolResult(result),
-          executionTime: result.executionTime
-        };
-      } catch (error) {
-        logger.error('Tool execution failed', {
-          source: 'decision_pipeline',
-          toolName: plugin.name,
-          error: error.message
-        });
-        
-        return {
-          pluginName: plugin.name,
-          toolName: plugin.name,
-          success: false,
-          error: error.message,
-          data: null
-        };
-      }
-    });
-
-    const toolResults = await Promise.all(toolPromises);
-    return toolResults.filter(result => result !== null);
-  }
-
-  /**
-   * Generate decision using appropriate prompt template
-   */
-  async generateDecision(decisionContext) {
-    const { message, channelContext, toolResults } = decisionContext;
-    
-    // Choose prompt type based on context
-    let promptType = 'quick';
-    if (toolResults.length > 0) {
-      promptType = 'plugin_enhanced';
-    }
-    
-    // Build decision prompt
-    const prompt = DecisionBuilder.buildDecisionPrompt(promptType, {
-      message,
-      channelContext,
-      toolResults
-    });
+  async generateDecision(message, channelContext, toolResults = []) {
+    // Build decision prompt - use tool prompt if we have tool results
+    const prompt = toolResults.length > 0 
+      ? this.promptBuilder.buildToolDecisionPrompt(message, channelContext, toolResults, [])
+      : this.promptBuilder.buildQuickDecisionPrompt(message, channelContext);
 
     // Generate decision via LLM - use correct method from actual LLM service
     if (!this.llmService) {
@@ -221,12 +127,8 @@ class DecisionPipeline {
     }
 
     try {
-      // Use the actual LLM service method like DecisionMaker does
-      const decisionSettings = {
-        temperature: 0.3,
-        max_tokens: 200,
-        top_p: 0.9
-      };
+      // FIX: Use proper decision settings instead of hardcoded ones
+      const decisionSettings = this.getDecisionSettings();
       
       const result = await this.llmService.generateCustomResponse(prompt, decisionSettings);
       
@@ -236,16 +138,16 @@ class DecisionPipeline {
         
         logger.debug('Decision generated via plugin system', {
           source: 'decision_pipeline',
-          promptType,
           toolCount: toolResults.length,
-          decision: decision.action
+          decision: decision.action,
+          model: decisionSettings.model,
+          provider: decisionSettings.provider
         });
 
         return {
           action: decision.action,
           reasoning: decision.reasoning,
           confidence: decision.confidence || 0.8,
-          promptType,
           toolResults,
           timestamp: new Date()
         };
@@ -263,12 +165,30 @@ class DecisionPipeline {
         action: 'ignore',
         reasoning: 'LLM decision generation failed, using fallback',
         confidence: 0.1,
-        promptType,
         toolResults,
         error: true,
         timestamp: new Date()
       };
     }
+  }
+
+  /**
+   * FIX: Get decision-specific settings (same as DecisionMaker)
+   */
+  getDecisionSettings() {
+    const storage = require('../../../utils/storage');
+    const settings = storage.getSettings();
+    const llmSettings = settings.llm || {};
+    
+    // Use separate decision model settings if available, otherwise fallback to main settings
+    return {
+      provider: llmSettings.decision_provider || llmSettings.provider || 'featherless',
+      model: llmSettings.decision_model || llmSettings.model || 'zai-org/GLM-4-9B-0414',
+      api_key: llmSettings.decision_api_key || llmSettings.api_key,
+      temperature: llmSettings.decision_temperature !== undefined ? parseFloat(llmSettings.decision_temperature) : 0.3,
+      max_tokens: llmSettings.decision_max_tokens ? parseInt(llmSettings.decision_max_tokens) : 200,
+      top_p: llmSettings.decision_top_p !== undefined ? parseFloat(llmSettings.decision_top_p) : 0.9
+    };
   }
 
   /**
@@ -299,6 +219,99 @@ class DecisionPipeline {
         confidence: 0.1
       };
     }
+  }
+
+  /**
+   * Determine if tools should be executed for this message
+   */
+  async shouldExecuteTools(message, channelContext) {
+    // Simple heuristics for tool usage
+    const triggers = {
+      trigger_0: this.hasToolTriggerKeywords(message.content),
+      trigger_1: channelContext.activityLevel === 'high',
+      trigger_2: message.author && !message.author.bot,
+      trigger_3: this.shouldAnalyzeBasedOnTiming(channelContext),
+      trigger_4: (channelContext.conversationHistory || []).length < 3
+    };
+
+    const shouldUse = Object.values(triggers).filter(Boolean).length >= 2;
+
+    logger.debug('Tool execution decision', {
+      source: 'decision_pipeline',
+      shouldUse,
+      triggers: Object.entries(triggers).map(([k, v]) => ({ [k]: v })),
+      availableTools: this.getAvailableTools()
+    });
+
+    return shouldUse;
+  }
+
+  /**
+   * Execute relevant tools for the current context
+   */
+  async executeRelevantTools(message, channelContext) {
+    const results = [];
+    const availableTools = PluginRegistry.getPluginsByType('tool');
+
+    for (const toolDefinition of availableTools) {
+      try {
+        const shouldExecute = await this.shouldExecuteTool(toolDefinition, message, channelContext);
+        
+        if (shouldExecute) {
+          // Use PluginRegistry.executeTool() which handles instantiation properly
+          const toolResult = await PluginRegistry.executeTool(toolDefinition.name, {
+            message,
+            channelContext,
+            discordClient: this.dependencies.discordClient
+          }, this.dependencies);
+
+          results.push({
+            tool: toolDefinition.name,
+            success: toolResult.success,
+            data: toolResult.data,
+            summary: this.summarizeToolResult(toolResult)
+          });
+
+          logger.debug('Tool executed in pipeline', {
+            source: 'decision_pipeline',
+            tool: toolDefinition.name,
+            success: toolResult.success,
+            hasData: !!toolResult.data
+          });
+        }
+      } catch (error) {
+        logger.error('Tool execution failed in pipeline', {
+          source: 'decision_pipeline',
+          tool: toolDefinition.name,
+          error: error.message
+        });
+
+        results.push({
+          tool: toolDefinition.name,
+          success: false,
+          error: error.message,
+          summary: `Failed: ${error.message}`
+        });
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Determine if a specific tool should be executed
+   */
+  async shouldExecuteTool(toolDefinition, message, channelContext) {
+    // For now, execute all available tools when tool execution is triggered
+    // Future: Implement tool-specific triggering logic based on toolDefinition.triggers
+    return true;
+  }
+
+  /**
+   * Get available tools count
+   */
+  getAvailableTools() {
+    return PluginRegistry.getPluginsByType('tool').length;
   }
 
   /**
@@ -385,14 +398,10 @@ class DecisionPipeline {
       return `Object with ${Object.keys(result.data).length} properties`;
     }
     
-    return 'Tool executed successfully';
+    return 'Success';
   }
 
   updateStats(processingTime) {
-    this.stats.decisionsProcessed++;
-    this.stats.lastDecisionTime = processingTime;
-    
-    // Update rolling average
     if (this.stats.averageDecisionTime === 0) {
       this.stats.averageDecisionTime = processingTime;
     } else {
@@ -405,18 +414,6 @@ class DecisionPipeline {
    */
   getStats() {
     return { ...this.stats };
-  }
-
-  /**
-   * Reset statistics
-   */
-  resetStats() {
-    this.stats = {
-      decisionsProcessed: 0,
-      toolExecutions: 0,
-      averageDecisionTime: 0,
-      lastDecisionTime: null
-    };
   }
 }
 
