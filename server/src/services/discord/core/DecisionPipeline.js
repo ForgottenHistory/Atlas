@@ -1,7 +1,5 @@
 const PluginRegistry = require('./PluginRegistry');
 const EventBus = require('./EventBus');
-// FIX: Use PromptBuilder instead of DecisionBuilder (same as DecisionMaker)
-const PromptBuilder = require('../../llm/decision/PromptBuilder');
 const logger = require('../../logger/Logger');
 
 /**
@@ -12,9 +10,6 @@ class DecisionPipeline {
   
   constructor(llmService, dependencies = {}) {
     this.llmService = llmService;
-    
-    // FIX: Initialize promptBuilder (same as DecisionMaker)
-    this.promptBuilder = new PromptBuilder();
     
     this.dependencies = {
       discordClient: null,
@@ -85,169 +80,158 @@ class DecisionPipeline {
     if (shouldUseTools) {
       // Execute tools for context enhancement
       decisionContext.toolResults = await this.executeRelevantTools(message, channelContext);
-      this.stats.toolExecutions += decisionContext.toolResults.length;
-      
-      // Log tool execution results
-      for (const toolResult of decisionContext.toolResults) {
-        EventBus.toolExecuted(toolResult.tool, toolResult, { messageId: message.id });
-      }
     }
 
-    // Phase 2: Generate decision with available context
-    const decision = await this.generateDecision(message, channelContext, decisionContext.toolResults);
+    // Phase 2: Generate decision using plugin system and/or LLM
+    let decision;
+    try {
+      // Try plugin-based decision first
+      decision = await this.generatePluginDecision(decisionContext);
+      
+      if (!decision || decision.action === 'uncertain') {
+        // Fallback to LLM decision
+        decision = await this.generateLLMDecision(decisionContext);
+      }
+    } catch (error) {
+      logger.warn('Decision generation failed, using fallback', {
+        source: 'decision_pipeline',
+        error: error.message
+      });
+      decision = this.createFallbackDecision(error);
+    }
+
+    // Phase 3: Validate and enhance the decision
+    const finalDecision = await this.validateDecision(decision, decisionContext);
     
-    // Phase 3: Validate and enhance decision
-    const validatedDecision = await this.validateDecision(decision, decisionContext);
-    
-    this.stats.decisionsProcessed++;
-    this.stats.lastDecisionTime = new Date();
-    
-    // Log decision made
-    EventBus.decisionMade(validatedDecision, {
-      toolsUsed: shouldUseTools,
-      toolCount: decisionContext.toolResults.length,
-      messageId: message.id
-    });
-    
-    return validatedDecision;
+    return finalDecision;
   }
 
   /**
-   * FIX: Generate decision using proper DecisionMaker-compatible methods
+   * Generate decision using LLM service
    */
-  async generateDecision(message, channelContext, toolResults = []) {
-    // Build decision prompt - use tool prompt if we have tool results
-    const prompt = toolResults.length > 0 
-      ? this.promptBuilder.buildToolDecisionPrompt(message, channelContext, toolResults, [])
-      : this.promptBuilder.buildQuickDecisionPrompt(message, channelContext);
-
-    // Generate decision via LLM - use correct method from actual LLM service
-    if (!this.llmService) {
-      throw new Error('LLM service not available for decision generation');
-    }
-
+  async generateLLMDecision(context) {
     try {
-      // FIX: Use proper decision settings instead of hardcoded ones
-      const decisionSettings = this.getDecisionSettings();
+      // Build simple prompt for decision making
+      const prompt = this.buildDecisionPrompt(context);
       
-      const result = await this.llmService.generateCustomResponse(prompt, decisionSettings);
-      
-      if (result.success) {
-        // Parse the decision from the response (same as DecisionMaker)
-        const decision = this.parseDecisionResponse(result.response);
-        
-        logger.debug('Decision generated via plugin system', {
-          source: 'decision_pipeline',
-          toolCount: toolResults.length,
-          decision: decision.action,
-          model: decisionSettings.model,
-          provider: decisionSettings.provider
-        });
+      const result = await this.llmService.generateCustomResponse(prompt, {
+        temperature: 0.3,
+        max_tokens: 200
+      });
 
-        return {
-          action: decision.action,
-          reasoning: decision.reasoning,
-          confidence: decision.confidence || 0.8,
-          toolResults,
-          timestamp: new Date()
-        };
-      } else {
-        throw new Error(result.error || 'LLM generation failed');
+      if (result.success) {
+        return this.parseDecisionResponse(result.response);
       }
+
+      return this.createFallbackDecision(new Error('LLM decision failed'));
     } catch (error) {
       logger.error('LLM decision generation failed', {
         source: 'decision_pipeline',
         error: error.message
       });
-      
-      // Return fallback decision
-      return {
-        action: 'ignore',
-        reasoning: 'LLM decision generation failed, using fallback',
-        confidence: 0.1,
-        toolResults,
-        error: true,
-        timestamp: new Date()
-      };
+      return this.createFallbackDecision(error);
     }
   }
 
   /**
-   * FIX: Get decision-specific settings (same as DecisionMaker)
+   * Build simple decision prompt
    */
-  getDecisionSettings() {
-    const storage = require('../../../utils/storage');
-    const settings = storage.getSettings();
-    const llmSettings = settings.llm || {};
+  buildDecisionPrompt(context) {
+    const { message, channelContext } = context;
     
-    // Use separate decision model settings if available, otherwise fallback to main settings
+    let prompt = `You are an AI bot deciding how to respond to a Discord message.
+
+Message: "${message.content}"
+Author: ${message.author?.username || 'Unknown'}
+Channel: ${channelContext.channelName || 'Unknown'}
+
+Choose ONE action:
+- respond: Send a conversational response
+- reply: Reply to their message specifically  
+- react: Add emoji reaction
+- ignore: Take no action
+
+Respond with just: ACTION: [your choice]
+REASONING: [brief explanation]`;
+
+    // Add tool results if available
+    if (context.toolResults && context.toolResults.length > 0) {
+      prompt += `\n\nTool information:\n`;
+      context.toolResults.forEach(result => {
+        prompt += `- ${result.tool}: ${result.summary || result.data}\n`;
+      });
+    }
+
+    return prompt;
+  }
+
+  /**
+   * Parse LLM decision response
+   */
+  parseDecisionResponse(response) {
+    const actionMatch = response.match(/ACTION:\s*(\w+)/i);
+    const reasoningMatch = response.match(/REASONING:\s*(.+)/i);
+    
     return {
-      provider: llmSettings.decision_provider || llmSettings.provider || 'featherless',
-      model: llmSettings.decision_model || llmSettings.model || 'zai-org/GLM-4-9B-0414',
-      api_key: llmSettings.decision_api_key || llmSettings.api_key,
-      temperature: llmSettings.decision_temperature !== undefined ? parseFloat(llmSettings.decision_temperature) : 0.3,
-      max_tokens: llmSettings.decision_max_tokens ? parseInt(llmSettings.decision_max_tokens) : 200,
-      top_p: llmSettings.decision_top_p !== undefined ? parseFloat(llmSettings.decision_top_p) : 0.9
+      action: actionMatch ? actionMatch[1].toLowerCase() : 'ignore',
+      reasoning: reasoningMatch ? reasoningMatch[1].trim() : 'No reasoning provided',
+      confidence: 0.7,
+      source: 'llm_pipeline'
     };
   }
 
   /**
-   * Parse decision response from LLM (simple parser)
+   * Generate decision using plugin system
    */
-  parseDecisionResponse(response) {
-    try {
-      // Simple parsing - look for ACTION: line
-      const actionMatch = response.match(/ACTION:\s*(\w+)/i);
-      const reasoningMatch = response.match(/REASONING:\s*(.+?)(?:\n|$)/i);
-      const confidenceMatch = response.match(/CONFIDENCE:\s*([\d.]+)/i);
-      
-      return {
-        action: actionMatch ? actionMatch[1].toLowerCase() : 'ignore',
-        reasoning: reasoningMatch ? reasoningMatch[1].trim() : 'No reasoning provided',
-        confidence: confidenceMatch ? parseFloat(confidenceMatch[1]) : 0.5
-      };
-    } catch (error) {
-      logger.error('Failed to parse decision response', {
-        source: 'decision_pipeline',
-        error: error.message,
-        response: response.substring(0, 100)
-      });
-      
-      return {
-        action: 'ignore',
-        reasoning: 'Failed to parse LLM response',
-        confidence: 0.1
-      };
+  async generatePluginDecision(context) {
+    // Check if any decision plugins are available
+    const decisionPlugins = PluginRegistry.getPluginsByType('decision');
+    
+    if (decisionPlugins.length === 0) {
+      return null; // No decision plugins available
     }
+
+    // Execute first available decision plugin
+    try {
+      const plugin = decisionPlugins[0];
+      const result = await PluginRegistry.executePlugin(
+        plugin.name, 
+        context, 
+        Object.fromEntries(this.dependencies)
+      );
+
+      if (result.success && result.data) {
+        return {
+          ...result.data,
+          source: 'plugin_decision'
+        };
+      }
+    } catch (error) {
+      logger.warn('Plugin decision failed', {
+        source: 'decision_pipeline',
+        error: error.message
+      });
+    }
+
+    return null;
   }
 
   /**
-   * Determine if tools should be executed for this message
+   * Determine if tools should be executed
    */
   async shouldExecuteTools(message, channelContext) {
     // Simple heuristics for tool usage
-    const triggers = {
-      trigger_0: this.hasToolTriggerKeywords(message.content),
-      trigger_1: channelContext.activityLevel === 'high',
-      trigger_2: message.author && !message.author.bot,
-      trigger_3: this.shouldAnalyzeBasedOnTiming(channelContext),
-      trigger_4: (channelContext.conversationHistory || []).length < 3
-    };
-
-    const shouldUse = Object.values(triggers).filter(Boolean).length >= 2;
-
-    logger.debug('Tool execution decision', {
-      source: 'decision_pipeline',
-      shouldUse,
-      triggers: Object.entries(triggers).map(([k, v]) => ({ [k]: v })),
-      availableTools: this.getAvailableTools()
-    });
-
-    return shouldUse;
+    const messageContent = message.content?.toLowerCase() || '';
+    
+    // Execute tools if message mentions users or asks questions
+    return messageContent.includes('@') || 
+           messageContent.includes('?') ||
+           messageContent.includes('who is') ||
+           messageContent.includes('profile');
   }
 
   /**
-   * Execute relevant tools for the current context
+   * Execute relevant tools based on context
    */
   async executeRelevantTools(message, channelContext) {
     const results = [];
@@ -255,29 +239,37 @@ class DecisionPipeline {
 
     for (const toolDefinition of availableTools) {
       try {
+        // Check if this tool should be executed
         const shouldExecute = await this.shouldExecuteTool(toolDefinition, message, channelContext);
         
         if (shouldExecute) {
-          // Use PluginRegistry.executeTool() which handles instantiation properly
-          const toolResult = await PluginRegistry.executeTool(toolDefinition.name, {
+          const context = {
             message,
             channelContext,
-            discordClient: this.dependencies.discordClient
-          }, this.dependencies);
+            originalMessage: message._originalMessage
+          };
 
-          results.push({
-            tool: toolDefinition.name,
-            success: toolResult.success,
-            data: toolResult.data,
-            summary: this.summarizeToolResult(toolResult)
-          });
+          const toolResult = await PluginRegistry.executeTool(
+            toolDefinition.name,
+            context,
+            Object.fromEntries(this.dependencies)
+          );
 
-          logger.debug('Tool executed in pipeline', {
-            source: 'decision_pipeline',
-            tool: toolDefinition.name,
-            success: toolResult.success,
-            hasData: !!toolResult.data
-          });
+          if (toolResult.success) {
+            results.push({
+              tool: toolDefinition.name,
+              success: true,
+              data: toolResult.data,
+              summary: toolResult.data?.summary || 'Tool executed successfully'
+            });
+          } else {
+            results.push({
+              tool: toolDefinition.name,
+              success: false,
+              error: toolResult.error,
+              summary: `Failed: ${toolResult.error}`
+            });
+          }
         }
       } catch (error) {
         logger.error('Tool execution failed in pipeline', {
@@ -305,13 +297,6 @@ class DecisionPipeline {
     // For now, execute all available tools when tool execution is triggered
     // Future: Implement tool-specific triggering logic based on toolDefinition.triggers
     return true;
-  }
-
-  /**
-   * Get available tools count
-   */
-  getAvailableTools() {
-    return PluginRegistry.getPluginsByType('tool').length;
   }
 
   /**
@@ -356,56 +341,30 @@ class DecisionPipeline {
       action: 'ignore',
       reasoning: `Error in decision pipeline: ${error.message}`,
       confidence: 0.1,
-      error: true,
-      timestamp: new Date(),
-      metadata: {
-        pipelineVersion: '2.0',
-        fallback: true
-      }
+      source: 'fallback',
+      error: error.message
     };
   }
 
-  // === HELPER METHODS ===
-
-  shouldAnalyzeBasedOnTiming(channelContext) {
-    if (!channelContext.lastActionTime) return true;
-    
-    const timeSinceLastAction = Date.now() - new Date(channelContext.lastActionTime).getTime();
-    const fiveMinutes = 5 * 60 * 1000;
-    
-    return timeSinceLastAction > fiveMinutes;
+  /**
+   * Get available tools count
+   */
+  getAvailableTools() {
+    return PluginRegistry.getPluginsByType('tool').length;
   }
 
-  hasToolTriggerKeywords(content) {
-    if (!content) return false;
-    
-    const keywords = ['profile', 'user', 'activity', 'history', 'status', 'info'];
-    const lowerContent = content.toLowerCase();
-    
-    return keywords.some(keyword => lowerContent.includes(keyword));
-  }
-
-  summarizeToolResult(result) {
-    if (!result.success) {
-      return `Failed: ${result.error}`;
-    }
-    
-    if (typeof result.data === 'string') {
-      return result.data.substring(0, 100) + (result.data.length > 100 ? '...' : '');
-    }
-    
-    if (typeof result.data === 'object') {
-      return `Object with ${Object.keys(result.data).length} properties`;
-    }
-    
-    return 'Success';
-  }
-
+  /**
+   * Update pipeline statistics
+   */
   updateStats(processingTime) {
+    this.stats.decisionsProcessed++;
+    this.stats.lastDecisionTime = Date.now();
+    
     if (this.stats.averageDecisionTime === 0) {
       this.stats.averageDecisionTime = processingTime;
     } else {
-      this.stats.averageDecisionTime = (this.stats.averageDecisionTime + processingTime) / 2;
+      this.stats.averageDecisionTime = 
+        (this.stats.averageDecisionTime + processingTime) / 2;
     }
   }
 
@@ -413,7 +372,10 @@ class DecisionPipeline {
    * Get pipeline statistics
    */
   getStats() {
-    return { ...this.stats };
+    return {
+      ...this.stats,
+      availableTools: this.getAvailableTools()
+    };
   }
 }
 
