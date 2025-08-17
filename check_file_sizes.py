@@ -2,6 +2,7 @@
 import os
 import fnmatch
 from pathlib import Path
+from datetime import datetime
 
 def parse_gitignore(gitignore_path):
     """Parse .gitignore file and return list of patterns."""
@@ -63,23 +64,24 @@ def categorize_file(file_path):
     else:
         return 'other'
 
-def print_file_list(title, file_list):
-    """Print a formatted list of files with line counts."""
+def write_file_list(md_file, title, file_list):
+    """Write a formatted list of files with line counts to markdown file."""
     if not file_list:
-        print(f"\n{title}: No files found")
+        md_file.write(f"\n## {title}\n\nNo files found.\n")
         return
     
-    print(f"\n{title}:")
-    print(f"{'Lines':<8} {'File'}")
-    print("-" * 60)
+    md_file.write(f"\n## {title}\n\n")
+    md_file.write("| Lines | File |\n")
+    md_file.write("|-------|------|\n")
     
     total_lines = 0
     for file_path, line_count in file_list:
-        print(f"{line_count:<8} {file_path}")
+        md_file.write(f"| {line_count:,} | `{file_path}` |\n")
         total_lines += line_count
     
-    print(f"\nFiles in {title.lower()}: {len(file_list)}")
-    print(f"Total lines in {title.lower()}: {total_lines}")
+    md_file.write(f"\n**Summary:**\n")
+    md_file.write(f"- Files: {len(file_list):,}\n")
+    md_file.write(f"- Total lines: {total_lines:,}\n")
 
 def main():
     root_dir = "."
@@ -131,29 +133,61 @@ def main():
     server_files.sort(key=lambda x: x[1], reverse=True)
     other_files.sort(key=lambda x: x[1], reverse=True)
     
-    # Print results for each category
-    print("=" * 60)
-    print("CODE ANALYSIS BY CATEGORY")
-    print("=" * 60)
+    # Generate markdown file
+    output_file = "code_analysis.md"
     
-    print_file_list("CLIENT FILES", client_files)
-    print_file_list("SERVER FILES", server_files)
-    print_file_list("OTHER FILES", other_files)
+    with open(output_file, 'w', encoding='utf-8') as md_file:
+        # Write header
+        md_file.write("# Code Analysis Report\n\n")
+        md_file.write(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        md_file.write(f"**Directory:** `{os.path.abspath(root_dir)}`\n\n")
+        
+        # Write table of contents
+        md_file.write("## Table of Contents\n\n")
+        if client_files:
+            md_file.write("- [Client Files](#client-files)\n")
+        if server_files:
+            md_file.write("- [Server Files](#server-files)\n")
+        if other_files:
+            md_file.write("- [Other Files](#other-files)\n")
+        md_file.write("- [Overall Summary](#overall-summary)\n")
+        
+        # Write file lists
+        write_file_list(md_file, "Client Files", client_files)
+        write_file_list(md_file, "Server Files", server_files)
+        write_file_list(md_file, "Other Files", other_files)
+        
+        # Write overall summary
+        total_files = len(client_files) + len(server_files) + len(other_files)
+        total_lines = (sum(count for _, count in client_files) + 
+                       sum(count for _, count in server_files) + 
+                       sum(count for _, count in other_files))
+        
+        md_file.write("\n## Overall Summary\n\n")
+        md_file.write("| Metric | Count |\n")
+        md_file.write("|--------|-------|\n")
+        md_file.write(f"| Total files analyzed | {total_files:,} |\n")
+        md_file.write(f"| Total lines of code | {total_lines:,} |\n")
+        md_file.write(f"| Client files | {len(client_files):,} |\n")
+        md_file.write(f"| Server files | {len(server_files):,} |\n")
+        md_file.write(f"| Other files | {len(other_files):,} |\n")
+        
+        # Add distribution chart (text-based)
+        if total_files > 0:
+            client_pct = (len(client_files) / total_files) * 100
+            server_pct = (len(server_files) / total_files) * 100
+            other_pct = (len(other_files) / total_files) * 100
+            
+            md_file.write("\n### File Distribution\n\n")
+            md_file.write("| Category | Files | Percentage |\n")
+            md_file.write("|----------|-------|------------|\n")
+            md_file.write(f"| Client | {len(client_files):,} | {client_pct:.1f}% |\n")
+            md_file.write(f"| Server | {len(server_files):,} | {server_pct:.1f}% |\n")
+            md_file.write(f"| Other | {len(other_files):,} | {other_pct:.1f}% |\n")
     
-    # Print overall summary
-    total_files = len(client_files) + len(server_files) + len(other_files)
-    total_lines = (sum(count for _, count in client_files) + 
-                   sum(count for _, count in server_files) + 
-                   sum(count for _, count in other_files))
-    
-    print("\n" + "=" * 60)
-    print("OVERALL SUMMARY")
-    print("=" * 60)
+    print(f"Code analysis complete! Report saved to: {output_file}")
     print(f"Total files analyzed: {total_files}")
-    print(f"Total lines of code: {total_lines}")
-    print(f"Client files: {len(client_files)}")
-    print(f"Server files: {len(server_files)}")
-    print(f"Other files: {len(other_files)}")
+    print(f"Total lines of code: {total_lines:,}")
 
 if __name__ == "__main__":
     main()
